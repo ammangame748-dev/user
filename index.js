@@ -121,6 +121,10 @@ app.get('/dashboard/servers', (req, res) => {
         </html>
     `);
 });
+// توجيه الزائر تلقائياً لصفحة تسجيل الدخول بدلاً من إظهار خطأ
+app.get('/', (req, res) => {
+    res.redirect('/login');
+});
 
 // --- صفحة التحكم باللوق للسيرفر المحدد ---
 app.get('/dashboard/manage/:guildId', (req, res) => {
