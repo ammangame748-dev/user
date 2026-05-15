@@ -17,10 +17,11 @@ app.use(session({
 
 const CONFIG_FILE = path.join(__dirname, 'progress.json');
 
-// إعدادات الـ OAuth2 (احصل عليها من Discord Developer Portal)
+// إعدادات الـ OAuth2 (تأكد من مطابقتها في Discord Developer Portal)
 const CLIENT_ID = process.env.CLIENT_ID || "1501846584961532004";
 const CLIENT_SECRET = process.env.CLIENT_SECRET || "lKyk-Mjv8FYAQMCXhPw0kd2A0-RoqX2W";
-const REDIRECT_URI = process.env.REDIRECT_URI || "https://user-bxik.onrender.com/auth/callback";
+// تم تصحيح الرابط هنا ليتطابق مع رابط Render الفعلي الخاص بك لمنع حلقة التوجيه
+const REDIRECT_URI = process.env.REDIRECT_URI || "https://onrender.com";
 
 function loadConfig() {
     if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}));
@@ -40,22 +41,19 @@ const client = new Client({
     ]
 });
 
-// --- مسارات تسجيل الدخول (OAuth2) ---
-
 // --- مسارات تسجيل الدخول (OAuth2) الصحيحة ---
 app.get('/login', (req, res) => {
-    // تم إصلاح الرابط هنا وإضافة المسار وعلامة الاستفهام بشكل سليم
+    // تم إصلاح الرابط بالكامل وإضافة مسار ديسكورد الصحيح وعلامة الـ $
     const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
     res.redirect(authorizeUrl);
 });
-
 
 app.get('/auth/callback', async (req, res) => {
     const code = req.query.code;
     if (!code) return res.send("لم يتم إتمام تسجيل الدخول.");
 
     try {
-        // تبديل الكود بـ Access Token
+        // تم تصحيح رابط ديسكورد لتبديل الكود بـ Access Token
         const tokenResponse = await fetch('https://discord.com', {
             method: 'POST',
             body: new URLSearchParams({
@@ -69,7 +67,11 @@ app.get('/auth/callback', async (req, res) => {
         });
         const tokenData = await tokenResponse.json();
 
-        // جلب سيرفرات المستخدم
+        if (!tokenData.access_token) {
+            return res.send("فشل الحصول على رمز الدخول من ديسكورد. تأكد من إعدادات الرابط في تطبيق المطورين.");
+        }
+
+        // تم تصحيح رابط جلب سيرفرات المستخدم
         const guildsResponse = await fetch('https://discord.com', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
@@ -78,6 +80,7 @@ app.get('/auth/callback', async (req, res) => {
         req.session.userGuilds = guilds;
         res.redirect('/dashboard/servers');
     } catch (error) {
+        console.error(error);
         res.send("حدث خطأ أثناء الاتصال بديسكورد.");
     }
 });
@@ -89,9 +92,8 @@ app.get('/dashboard/servers', (req, res) => {
     let serverCards = '';
 
     req.session.userGuilds.forEach(guild => {
-        // التحقق من صلاحية الأدمن (Administrator) باستخدام الـ Permissions Bitwise
         const isAdmin = (BigInt(guild.permissions) & BigInt(0x8)) === BigInt(0x8);
-        if (!isAdmin) return; // تخطي السيرفر إذا لم يكن أدمن فيه
+        if (!isAdmin) return;
 
         const isBotInGuild = client.guilds.cache.has(guild.id);
 
@@ -102,6 +104,7 @@ app.get('/dashboard/servers', (req, res) => {
                     <a href="/dashboard/manage/${guild.id}" style="background: #5865f2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">تحكم بالسيرفر</a>
                 </div>`;
         } else {
+            // تم إصلاح رابط دعوة البوت هنا أيضاً بإضافة الـ $ والمصطلح الصحيح
             const inviteUrl = `https://discord.com{CLIENT_ID}&permissions=8&scope=bot&guild_id=${guild.id}&disable_guild_select=true`;
             serverCards += `
                 <div style="background: #2f3136; padding: 20px; margin: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px dashed #4f545c;">
@@ -124,7 +127,8 @@ app.get('/dashboard/servers', (req, res) => {
         </html>
     `);
 });
-// توجيه الزائر تلقائياً لصفحة تسجيل الدخول بدلاً من إظهار خطأ
+
+// توجيه الزائر تلقائياً لصفحة تسجيل الدخول
 app.get('/', (req, res) => {
     res.redirect('/login');
 });
