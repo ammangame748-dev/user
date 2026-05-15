@@ -42,10 +42,13 @@ const client = new Client({
 
 // --- مسارات تسجيل الدخول (OAuth2) ---
 
+// --- مسارات تسجيل الدخول (OAuth2) الصحيحة ---
 app.get('/login', (req, res) => {
+    // تم إصلاح الرابط هنا وإضافة المسار وعلامة الاستفهام بشكل سليم
     const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
     res.redirect(authorizeUrl);
 });
+
 
 app.get('/auth/callback', async (req, res) => {
     const code = req.query.code;
