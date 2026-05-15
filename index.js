@@ -248,4 +248,4 @@ client.on('messageDelete', async (message) => {
 client.once('ready', () => console.log(`تم تشغيل البوت: ${client.user.tag}`));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`الداش بورد تعمل على المنفذ: ${port}`));
-client.login(process.env.DISCORD_TOKEN);
+client.login("MTUwMTg0NjU4NDk2MTUzMjAwNA.GxNA_j.HzvU_EDs4J4qdslA1KyUaDrkZ_-RjHaFXBlzJ0");
