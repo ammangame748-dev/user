@@ -257,6 +257,7 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
 });
 
 
+
 app.post('/dashboard/save/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
     const guildId = req.params.guildId;
@@ -264,32 +265,29 @@ app.post('/dashboard/save/:guildId', (req, res) => {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return res.send("السيرفر غير موجود");
 
-    const db = loadConfig();
-    if (!db[guildId]) db[guildId] = {};
-
-    const { formType } = req.body;
-
-    if (formType === "logs") {
-        // حفظ بيانات صفحة اللوق
-        const { logChannelId, monitoredChannels } = req.body;
-        const allTextChannels = guild.channels.cache.filter(ch => ch.type === 0).map(ch => ch.id);
-        const submittedChannels = Array.isArray(monitoredChannels) ? monitoredChannels : (monitoredChannels ? [monitoredChannels] : []);
-        db[guildId].logChannelId = logChannelId;
-        db[guildId].ignoredChannels = allTextChannels.filter(id => !submittedChannels.includes(id));
-    } else if (formType === "timeout") {
-        // حفظ بيانات صفحة اختصار الخنق
-        const { timeoutChannelId, timeoutDuration } = req.body;
-        db[guildId].timeoutChannelId = timeoutChannelId;
-        db[guildId].timeoutDuration = timeoutDuration;
+    // التأكد أن المستخدم أدمن في السيرفر المطلوب لحماية الثغرات ومنع التلاعب
+    const userGuild = req.session.userGuilds.find(g => g.id === guildId);
+    if (!userGuild || (BigInt(userGuild.permissions) & BigInt(0x8)) !== BigInt(0x8)) {
+        return res.status(403).send("غير مصرح لك بتعديل إعدادات هذا السيرفر.");
     }
 
+    const { logChannelId, monitoredChannels } = req.body;
+    const allTextChannels = guild.channels.cache.filter(ch => ch.type === 0).map(ch => ch.id);
+    const submittedChannels = Array.isArray(monitoredChannels) ? monitoredChannels : (monitoredChannels ? [monitoredChannels] : []);
+    const ignoredChannels = allTextChannels.filter(id => !submittedChannels.includes(id));
+
+    const db = loadConfig();
+    db[guildId] = { logChannelId, ignoredChannels };
     saveConfig(db);
+
     res.send(`<script>alert('تم الحفظ بنجاح!'); window.location='/dashboard/manage/${guildId}';</script>`);
 });
 
+
 // --- نظام الأحداث للوق (معدل بدون منشن) ---
 client.on('messageUpdate', async (oldMessage, newMessage) => {
-    if (oldMessage.author?.bot || oldMessage.content === newMessage.content || !oldMessage.guild) return;
+    if (oldMessage.author?.id === client.user.id || oldMessage.content === newMessage.content || !oldMessage.guild) return;
+
     const db = loadConfig(); const config = db[oldMessage.guild.id];
     if (!config || !config.logChannelId || config.ignoredChannels.includes(oldMessage.channel.id)) return;
 
@@ -313,7 +311,8 @@ client.on('messageDelete', async (message) => {
         try { await message.fetch(); } catch (e) { return; }
     }
 
-    if (message.author?.bot || !message.guild) return;
+    // إذا كان كاتب الرسالة هو البوت الخاص بك نفسه، أو لم تكن الرسالة داخل سيرفر، تجاهلها
+if (message.author?.id === client.user.id || !message.guild) return;
     const db = loadConfig();
     const config = db[message.guild.id];
     if (!config || !config.logChannelId || config.ignoredChannels.includes(message.channel.id)) return;
@@ -356,70 +355,6 @@ client.on('messageDelete', async (message) => {
         logChannel.send({ embeds: [embed] }).catch(err => console.error("فشل إرسال لوق الحذف:", err));
     }
 });
-client.on('messageCreate', async (message) => {
-    // التحقق من أن الرسالة ليست من بوت، وأنها داخل سيرفر، وتبدأ بكلمة !خنق
-    if (message.author.bot || !message.guild || !message.content.startsWith('!خنق')) return;
-
-    // التحقق من صلاحية الإدارة للأعضاء قبل تنفيذ التايم آوت
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-        return message.reply('❌ ليس لديك صلاحية استخدام أمر الخنق.');
-    }
-
-    const args = message.content.split(' ');
-    // جلب العضو الممنشن أو عبر الـ ID الخاص به
-    const targetMember = message.mentions.members.first() || message.guild.members.cache.get(args[1]);
-
-    if (!targetMember) {
-        return message.reply('❌ يرجى تحديد العضو. مثال: `!خنق @watan غلط على ادمن`');
-    }
-
-    const db = loadConfig();
-    const config = db[message.guild.id];
-
-    // التأكد من ضبط إعدادات صفحة الخنق في الداشبورد أولاً
-    if (!config || !config.timeoutChannelId) {
-        return message.reply('❌ لم يتم إعداد روم إرسال إمبيد الخنق من لوحة التحكم بعد.');
-    }
-
-    // أخذ المدة المحددة مسبقاً من الداشبورد افتراضياً
-    const durationMinutes = parseInt(config.timeoutDuration) || 1;
-
-    // جلب السبب المكتوب في الشات بعد المنشن (مثل: غلط على ادمن)
-    // إذا لم يكتب الأدمن أي سبب، سيتم وضع الرقم '1' تلقائياً كسبب افتراضي مثل صورتك
-    const reason = args.slice(2).join(' ') || '1';
-
-    try {
-        // تطبيق التايم آوت الفعلي على العضو (المدة بالملي ثانية)
-        await targetMember.timeout(durationMinutes * 60 * 1000, reason);
-
-        // جلب الروم المحددة من الداشبورد لإرسال الإمبيد
-        const targetChannel = message.guild.channels.cache.get(config.timeoutChannelId);
-        if (targetChannel) {
-            const embed = new EmbedBuilder()
-                .setAuthor({ name: 'تم تطبيق التايم آوت ⏳' })
-                .setColor('#2f3136') // لون الـ Embed الداكن المطابق للصورة
-                .addFields(
-                    { name: '👤 العضو', value: `<@${targetMember.id}>`, inline: true }, // منشن حقيقي للعضو
-                    { name: '🛡️ المشرف', value: `<@${message.author.id}>`, inline: true }, // منشن حقيقي للأدمن
-                    { name: '⏱️ المدة', value: `${durationMinutes} دقيقة`, inline: true },
-                    { name: '📝 السبب', value: `\`\`\`\n${reason}\n\`\`\`` } // قالب السبب النصي
-                )
-                .setTimestamp();
-
-            await targetChannel.send({ embeds: [embed] });
-
-            // حذف رسالة الأمر الأصلية لتبدو اللوحة منظمة في الشات (اختياري)
-            await message.delete().catch(() => { });
-        } else {
-            message.reply('❌ فشل العثور على الروم المحددة في الداشبورد لإرسال اللوق.');
-        }
-
-    } catch (err) {
-        console.error(err);
-        message.reply('❌ حدث خطأ أثناء محاولة إعطاء التايم آوت. تأكد من أن رتبة البوت أعلى من رتبة العضو المستهدف.');
-    }
-});
-
 
 client.once('ready', () => console.log(`تم تشغيل البوت: ${client.user.tag}`));
 const port = process.env.PORT || 3000;
