@@ -147,7 +147,7 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
     if (!guild) return res.send("البوت غادر السيرفر.");
 
     const db = loadConfig();
-    const config = db[guildId] || { logChannelId: "", ignoredChannels: [] };
+    const config = db[guildId] || { logChannelId: "", ignoredChannels: [], timeoutChannelId: "", timeoutDuration: "1" };
     const allChannels = guild.channels.cache.filter(ch => ch.type === 0);
 
     let channelOptions = '';
@@ -166,30 +166,90 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
-            <meta charset="UTF-8"><title>إعدادات اللوق - ${guild.name}</title>
+            <meta charset="UTF-8">
+            <title>لوحة التحكم - ${guild.name}</title>
             <style>
-                body { font-family: sans-serif; background: #2f3136; color: white; padding: 20px; }
-                .container { max-width: 600px; margin: 0 auto; background: #202225; padding: 20px; border-radius: 8px; }
-                select, button { padding: 10px; border-radius: 5px; border: none; width: 100%; box-sizing: border-box; }
-                select { background: #40444b; color: white; }
-                button { background: #5865f2; color: white; font-weight: bold; cursor: pointer; margin-top: 20px; }
+                body { font-family: sans-serif; background: #2f3136; color: white; margin: 0; padding: 0; display: flex; height: 100vh; }
+                /* تصميم المنيو على اليمين */
+                .sidebar { width: 250px; background: #202225; padding: 20px; display: flex; flex-direction: column; border-left: 1px solid #202225; box-sizing: border-box; }
+                .sidebar h3 { margin-bottom: 20px; text-align: center; color: #5865f2; }
+                .sidebar a { color: #b9bbbe; text-decoration: none; padding: 12px; margin-bottom: 10px; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+                .sidebar a:hover, .sidebar a.active { background: #36393f; color: white; }
+                .sidebar .back-btn { background: #e74c3c; color: white; text-align: center; margin-top: auto; }
+                
+                /* تصميم المحتوى الرئيسي على اليسار */
+                .main-content { flex: 1; padding: 40px; overflow-y: auto; background: #36393f; box-sizing: border-box; }
+                .tab-content { display: none; max-width: 600px; background: #202225; padding: 30px; border-radius: 8px; box-sizing: border-box; }
+                .tab-content.active { display: block; }
+                
+                select, input, button { padding: 10px; border-radius: 5px; border: none; width: 100%; box-sizing: border-box; margin-top: 5px; margin-bottom: 15px; }
+                select, input { background: #40444b; color: white; }
+                button { background: #5865f2; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
+                label { font-weight: bold; display: block; margin-top: 10px; }
             </style>
         </head>
         <body>
-            <div class="container">
-                <a href="/dashboard/servers" style="color: #b9bbbe; text-decoration: none;">⬅️ العودة للسيرفرات</a>
-                <h2>إعدادات اللوق لـ ${guild.name}</h2>
-                <form action="/dashboard/save/${guildId}" method="POST">
-                    <label>روم إرسال اللوق الرئيسية:</label>
-                    <select name="logChannelId"><option value="">-- اختر روم --</option>${channelOptions}</select>
-                    <h3>الرومات المراد مراقبتها:</h3>
-                    ${channelCheckboxes}
-                    <button type="submit">حفظ التغييرات</button>
-                </form>
+
+            <!-- المنيو على اليمين -->
+            <div class="sidebar">
+                <h3>${guild.name}</h3>
+                <a onclick="switchTab('log-settings')" id="btn-log-settings" class="active">📝 إعدادات اللوق</a>
+                <a onclick="switchTab('timeout-settings')" id="btn-timeout-settings">⏳ اختصار الخنق</a>
+                <a href="/dashboard/servers" class="back-btn">⬅️ السيرفرات</a>
             </div>
+
+            <!-- المحتوى الرئيسي على اليسار -->
+            <div class="main-content">
+                
+                <!-- الصفحة الأولى: إعدادات اللوق -->
+                <div id="log-settings" class="tab-content active">
+                    <h2>📝 إعدادات اللوق الرئيسية</h2>
+                    <form action="/dashboard/save/${guildId}" method="POST">
+                        <input type="hidden" name="formType" value="logs">
+                        <label>روم إرسال اللوق الرئيسية:</label>
+                        <select name="logChannelId"><option value="">-- اختر روم --</option>${channelOptions}</select>
+                        <h3>الرومات المراد مراقبتها:</h3>
+                        ${channelCheckboxes}
+                        <button type="submit">حفظ التغييرات</button>
+                    </form>
+                </div>
+
+                <!-- الصفحة الثانية: إعدادات أمر اختصار الخنق -->
+                <div id="timeout-settings" class="tab-content">
+                    <h2>⏳ إعدادات أمر اختصار الخنق</h2>
+                    <p style="color: #b9bbbe; font-size: 14px;">عند كتابة الأمر !خنق في السيرفر، سيقوم البوت بتطبيق التايم آوت وإرسال إمبيد العقوبة في الروم المحددة.</p>
+                    <form action="/dashboard/save/${guildId}" method="POST">
+                        <input type="hidden" name="formType" value="timeout">
+                        
+                        <label>روم إرسال إمبيد التايم آوت:</label>
+                        <select name="timeoutChannelId">
+                            <option value="">-- اختر روم --</option>
+                            ${allChannels.map(ch => `<option value="${ch.id}" ${config.timeoutChannelId === ch.id ? 'selected' : ''}>#${ch.name}</option>`).join('')}
+                        </select>
+
+                        <label>مدة الخنق الافتراضية (بالدقائق):</label>
+                        <input type="number" name="timeoutDuration" min="1" max="40320" value="${config.timeoutDuration || '1'}" placeholder="مثال: 1">
+
+                        <button type="submit" style="background: #43b581;">حفظ إعدادات الخنق</button>
+                    </form>
+                </div>
+
+            </div>
+
+            <!-- كود جافاسكريبت لتبديل الصفحات داخل لوحة التحكم بدون إعادة تحميل -->
+            <script>
+                function switchTab(tabId) {
+                    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                    document.querySelectorAll('.sidebar a').forEach(btn => btn.classList.remove('active'));
+                    
+                    document.getElementById(tabId).classList.add('active');
+                    document.getElementById('btn-' + tabId).classList.add('active');
+                }
+            </script>
         </body>
         </html>
     `);
+
 });
 
 app.post('/dashboard/save/:guildId', (req, res) => {
@@ -199,16 +259,27 @@ app.post('/dashboard/save/:guildId', (req, res) => {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return res.send("السيرفر غير موجود");
 
-    const { logChannelId, monitoredChannels } = req.body;
-    const allTextChannels = guild.channels.cache.filter(ch => ch.type === 0).map(ch => ch.id);
-    const submittedChannels = Array.isArray(monitoredChannels) ? monitoredChannels : (monitoredChannels ? [monitoredChannels] : []);
-    const ignoredChannels = allTextChannels.filter(id => !submittedChannels.includes(id));
-
     const db = loadConfig();
-    db[guildId] = { logChannelId, ignoredChannels };
-    saveConfig(db);
+    if (!db[guildId]) db[guildId] = {};
 
-    res.send(`<script>alert('تم الحفظ!'); window.location='/dashboard/manage/${guildId}';</script>`);
+    const { formType } = req.body;
+
+    if (formType === "logs") {
+        // حفظ بيانات صفحة اللوق
+        const { logChannelId, monitoredChannels } = req.body;
+        const allTextChannels = guild.channels.cache.filter(ch => ch.type === 0).map(ch => ch.id);
+        const submittedChannels = Array.isArray(monitoredChannels) ? monitoredChannels : (monitoredChannels ? [monitoredChannels] : []);
+        db[guildId].logChannelId = logChannelId;
+        db[guildId].ignoredChannels = allTextChannels.filter(id => !submittedChannels.includes(id));
+    } else if (formType === "timeout") {
+        // حفظ بيانات صفحة اختصار الخنق
+        const { timeoutChannelId, timeoutDuration } = req.body;
+        db[guildId].timeoutChannelId = timeoutChannelId;
+        db[guildId].timeoutDuration = timeoutDuration;
+    }
+
+    saveConfig(db);
+    res.send(`<script>alert('تم الحفظ بنجاح!'); window.location='/dashboard/manage/${guildId}';</script>`);
 });
 
 // --- نظام الأحداث للوق (معدل بدون منشن) ---
@@ -222,7 +293,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
         const embed = new EmbedBuilder().setAuthor({ name: ' رسالة معدلة' }).setColor('#f1c40f')
             .addFields(
                 { name: ' الشخص:', value: `<@${oldMessage.author.id}>`, inline: true },
-{ name: ' في روم:', value: `<#${oldMessage.channel.id}>`, inline: true },
+                { name: ' في روم:', value: `<#${oldMessage.channel.id}>`, inline: true },
 
                 { name: ' قبل:', value: oldMessage.content || '*ميديا*' },
                 { name: ' بعد:', value: newMessage.content || '*ميديا*' }
@@ -238,7 +309,7 @@ client.on('messageDelete', async (message) => {
     }
 
     if (message.author?.bot || !message.guild) return;
-    const db = loadConfig(); 
+    const db = loadConfig();
     const config = db[message.guild.id];
     if (!config || !config.logChannelId || config.ignoredChannels.includes(message.channel.id)) return;
 
@@ -249,12 +320,12 @@ client.on('messageDelete', async (message) => {
             // جلب سجل التدقيق لمعرفة المسؤول عن الحذف
             const fetchedLogs = await message.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MessageDelete });
             const deletionLog = fetchedLogs.entries.first();
-            
+
             if (deletionLog && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
                 // تحويل المسؤول عن الحذف إلى منشن حقيقي باستخدام المعرف ID
                 executor = `<@${deletionLog.executor.id}>`;
             }
-        } catch (e) { 
+        } catch (e) {
             console.error("فشل جلب سجل التدقيق للحذف:", e);
         }
 
@@ -278,6 +349,69 @@ client.on('messageDelete', async (message) => {
             ).setTimestamp();
 
         logChannel.send({ embeds: [embed] }).catch(err => console.error("فشل إرسال لوق الحذف:", err));
+    }
+});
+client.on('messageCreate', async (message) => {
+    // التحقق من أن الرسالة ليست من بوت، وأنها داخل سيرفر، وتبدأ بكلمة !خنق
+    if (message.author.bot || !message.guild || !message.content.startsWith('!خنق')) return;
+
+    // التحقق من صلاحية الإدارة للأعضاء قبل تنفيذ التايم آوت
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+        return message.reply('❌ ليس لديك صلاحية استخدام أمر الخنق.');
+    }
+
+    const args = message.content.split(' ');
+    // جلب العضو الممنشن أو عبر الـ ID الخاص به
+    const targetMember = message.mentions.members.first() || message.guild.members.cache.get(args[1]);
+
+    if (!targetMember) {
+        return message.reply('❌ يرجى تحديد العضو. مثال: `!خنق @watan غلط على ادمن`');
+    }
+
+    const db = loadConfig();
+    const config = db[message.guild.id];
+
+    // التأكد من ضبط إعدادات صفحة الخنق في الداشبورد أولاً
+    if (!config || !config.timeoutChannelId) {
+        return message.reply('❌ لم يتم إعداد روم إرسال إمبيد الخنق من لوحة التحكم بعد.');
+    }
+
+    // أخذ المدة المحددة مسبقاً من الداشبورد افتراضياً
+    const durationMinutes = parseInt(config.timeoutDuration) || 1;
+
+    // جلب السبب المكتوب في الشات بعد المنشن (مثل: غلط على ادمن)
+    // إذا لم يكتب الأدمن أي سبب، سيتم وضع الرقم '1' تلقائياً كسبب افتراضي مثل صورتك
+    const reason = args.slice(2).join(' ') || '1';
+
+    try {
+        // تطبيق التايم آوت الفعلي على العضو (المدة بالملي ثانية)
+        await targetMember.timeout(durationMinutes * 60 * 1000, reason);
+
+        // جلب الروم المحددة من الداشبورد لإرسال الإمبيد
+        const targetChannel = message.guild.channels.cache.get(config.timeoutChannelId);
+        if (targetChannel) {
+            const embed = new EmbedBuilder()
+                .setAuthor({ name: 'تم تطبيق التايم آوت ⏳' })
+                .setColor('#2f3136') // لون الـ Embed الداكن المطابق للصورة
+                .addFields(
+                    { name: '👤 العضو', value: `<@${targetMember.id}>`, inline: true }, // منشن حقيقي للعضو
+                    { name: '🛡️ المشرف', value: `<@${message.author.id}>`, inline: true }, // منشن حقيقي للأدمن
+                    { name: '⏱️ المدة', value: `${durationMinutes} دقيقة`, inline: true },
+                    { name: '📝 السبب', value: `\`\`\`\n${reason}\n\`\`\`` } // قالب السبب النصي
+                )
+                .setTimestamp();
+
+            await targetChannel.send({ embeds: [embed] });
+
+            // حذف رسالة الأمر الأصلية لتبدو اللوحة منظمة في الشات (اختياري)
+            await message.delete().catch(() => { });
+        } else {
+            message.reply('❌ فشل العثور على الروم المحددة في الداشبورد لإرسال اللوق.');
+        }
+
+    } catch (err) {
+        console.error(err);
+        message.reply('❌ حدث خطأ أثناء محاولة إعطاء التايم آوت. تأكد من أن رتبة البوت أعلى من رتبة العضو المستهدف.');
     }
 });
 
