@@ -1,5 +1,6 @@
-const { Client, GatewayIntentBits, EmbedBuilder, AuditLogEvent, PermissionsBitField } = require('discord.js');
 const express = require('express');
+const { Client, GatewayIntentBits, EmbedBuilder, AuditLogEvent, PermissionsBitField, Partials } = require('discord.js');
+
 const session = require('express-session');
 const fs = require('fs');
 const path = require('path');
@@ -38,8 +39,11 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildModeration
-    ]
+    ],
+    // تفعيل البارتشالز لقراءة الرسائل والرومات المحذوفة حتى لو كانت قديمة
+    partials: [Partials.Message, Partials.Channel] 
 });
+
 
 // --- مسارات تسجيل الدخول (OAuth2) الصحيحة ---
 app.get('/login', (req, res) => {
