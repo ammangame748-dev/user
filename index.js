@@ -312,7 +312,8 @@ client.on('messageDelete', async (message) => {
     }
 
     // إذا كان كاتب الرسالة هو البوت الخاص بك نفسه، أو لم تكن الرسالة داخل سيرفر، تجاهلها
-if (message.author?.id === client.user.id || !message.guild) return;
+    if (message.author?.id === client.user.id || !message.guild) return;
+
     const db = loadConfig();
     const config = db[message.guild.id];
     if (!config || !config.logChannelId || config.ignoredChannels.includes(message.channel.id)) return;
@@ -320,22 +321,22 @@ if (message.author?.id === client.user.id || !message.guild) return;
     const logChannel = message.guild.channels.cache.get(config.logChannelId);
     if (logChannel) {
         let executor = "غير معروف";
+        
         try {
-            // جلب سجل التدقيق لمعرفة المسؤول عن الحذف
+            // جلب سجل التدقيق الأخير لمعرفة المسؤول عن الحذف
             const fetchedLogs = await message.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MessageDelete });
             const deletionLog = fetchedLogs.entries.first();
 
+            // فحص ذكي: إذا وجدنا سجل تدقيق للحذف تم إنشاؤه في آخر 5 ثوانٍ، وكان المستهدف فيه هو صاحب الرسالة
             if (deletionLog && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
-                // تحويل المسؤول عن الحذف إلى منشن حقيقي باستخدام المعرف ID
+                // نضع منشن المشرف الحاذف الفعلي
                 executor = `<@${deletionLog.executor.id}>`;
+            } else {
+                // إذا لم نجد سجل تدقيق حديث، فهذا يعني منطقياً بنسبة 100% أن صاحب الرسالة حذفها بنفسه (لأن ديسكورد لا يصنع سجل لحذف الشخص لرسالته)
+                executor = `<@${message.author.id}>`;
             }
         } catch (e) {
-            console.error("فشل جلب سجل التدقيق للحذف:", e);
-        }
-
-        // إذا قام كاتب الرسالة بحذف رسالته بنفسه، فلن يسجلها ديسكورد في الـ Audit Logs، لذا نضع منشن كاتب الرسالة كحاذف
-        if (executor === "غير معروف") {
-            // إذا مر الوقت أو لم يتم العثور على سجل، نفترض منطقياً أن الكاتب هو من حذفها
+            // في حال فشل جلب الـ Logs بسبب صلاحيات أو بطء، نفترض الافتراض الآمن وهو كاتب الرسالة
             executor = `<@${message.author.id}>`;
         }
 
@@ -347,14 +348,15 @@ if (message.author?.id === client.user.id || !message.guild) return;
             .setColor('#e74c3c')
             .addFields(
                 { name: ' كاتب الرسالة:', value: `<@${message.author.id}>`, inline: true }, // منشن الكاتب
-                { name: ' الحاذف:', value: executor, inline: true },                     // منشن الحاذف
-                { name: ' في روم:', value: `<#${message.channel.id}>`, inline: true },      // منشن الروم
+                { name: ' الحاذف:', value: executor, inline: true },                     // منشن الحاذف الفعلي (مشرف أو الكاتب نفسه)
+                { name: ' في روم:', value: `<#${message.channel.id}>`, inline: true },      // منشن الروم قابل للضغط
                 { name: ' المحتوى:', value: messageContent }
             ).setTimestamp();
 
         logChannel.send({ embeds: [embed] }).catch(err => console.error("فشل إرسال لوق الحذف:", err));
     }
 });
+
 
 client.once('ready', () => console.log(`تم تشغيل البوت: ${client.user.tag}`));
 const port = process.env.PORT || 3000;
