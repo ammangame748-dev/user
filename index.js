@@ -21,7 +21,7 @@ const CONFIG_FILE = path.join(__dirname, 'progress.json');
 const CLIENT_ID = process.env.CLIENT_ID || "1501846584961532004";
 const CLIENT_SECRET = process.env.CLIENT_SECRET || "lKyk-Mjv8FYAQMCXhPw0kd2A0-RoqX2W";
 // تم تصحيح الرابط هنا ليتطابق مع رابط Render الفعلي الخاص بك لمنع حلقة التوجيه
-const REDIRECT_URI = process.env.REDIRECT_URI || "https://onrender.com";
+const REDIRECT_URI = process.env.REDIRECT_URI || "https://user-q5p3.onrender.com/auth/callback";
 
 function loadConfig() {
     if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}));
@@ -44,7 +44,7 @@ const client = new Client({
 // --- مسارات تسجيل الدخول (OAuth2) الصحيحة ---
 app.get('/login', (req, res) => {
     // تم إصلاح الرابط بالكامل وإضافة مسار ديسكورد الصحيح وعلامة الـ $
-    const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
+    const authorizeUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
     res.redirect(authorizeUrl);
 });
 
@@ -54,7 +54,7 @@ app.get('/auth/callback', async (req, res) => {
 
     try {
         // تم تصحيح رابط ديسكورد لتبديل الكود بـ Access Token
-        const tokenResponse = await fetch('https://discord.com', {
+        const tokenResponse = await fetch('https://discord.com/api/v10/oauth2/token', {
             method: 'POST',
             body: new URLSearchParams({
                 client_id: CLIENT_ID,
@@ -72,7 +72,7 @@ app.get('/auth/callback', async (req, res) => {
         }
 
         // تم تصحيح رابط جلب سيرفرات المستخدم
-        const guildsResponse = await fetch('https://discord.com', {
+        const guildsResponse = await fetch('https://discord.com/api/v10/users/@me/guilds', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` }
         });
         const guilds = await guildsResponse.json();
@@ -105,7 +105,7 @@ app.get('/dashboard/servers', (req, res) => {
                 </div>`;
         } else {
             // تم إصلاح رابط دعوة البوت هنا أيضاً بإضافة الـ $ والمصطلح الصحيح
-            const inviteUrl = `https://discord.com{CLIENT_ID}&permissions=8&scope=bot&guild_id=${guild.id}&disable_guild_select=true`;
+            const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&permissions=8&scope=bot&guild_id=${guild.id}&disable_guild_select=true`;
             serverCards += `
                 <div style="background: #2f3136; padding: 20px; margin: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px dashed #4f545c;">
                     <span style="color: #b9bbbe;">🔴 ${guild.name}</span>
@@ -138,6 +138,7 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
 
     const guildId = req.params.guildId;
+
     // التأكد أن المستخدم أدمن في السيرفر المطلوب لحماية الثغرات
     const userGuild = req.session.userGuilds.find(g => g.id === guildId);
     if (!userGuild || (BigInt(userGuild.permissions) & BigInt(0x8)) !== BigInt(0x8)) return res.send("غير مصرح لك.");
