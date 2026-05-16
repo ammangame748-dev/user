@@ -219,43 +219,68 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 
     const logChannel = oldMessage.guild.channels.cache.get(config.logChannelId);
     if (logChannel) {
-        const embed = new EmbedBuilder().setAuthor({ name: '📝 رسالة معدلة' }).setColor('#f1c40f')
+        const embed = new EmbedBuilder().setAuthor({ name: ' رسالة معدلة' }).setColor('#f1c40f')
             .addFields(
-                { name: '👤 الشخص:', value: `${oldMessage.author.username}`, inline: true },
-                { name: '📺 في روم:', value: `#${oldMessage.channel.name}`, inline: true },
-                { name: '⬅️ قبل:', value: oldMessage.content || '*ميديا*' },
-                { name: '➡️ بعد:', value: newMessage.content || '*ميديا*' }
+                { name: ' الشخص:', value: `<@${oldMessage.author.id}>`, inline: true },
+{ name: ' في روم:', value: `<#${oldMessage.channel.id}>`, inline: true },
+
+                { name: ' قبل:', value: oldMessage.content || '*ميديا*' },
+                { name: ' بعد:', value: newMessage.content || '*ميديا*' }
             ).setTimestamp();
         logChannel.send({ embeds: [embed] });
     }
 });
 
 client.on('messageDelete', async (message) => {
+    // جلب بيانات الرسالة كاملة إذا لم تكن مخزنة في الذاكرة المؤقتة للبوت
+    if (message.partial) {
+        try { await message.fetch(); } catch (e) { return; }
+    }
+
     if (message.author?.bot || !message.guild) return;
-    const db = loadConfig(); const config = db[message.guild.id];
+    const db = loadConfig(); 
+    const config = db[message.guild.id];
     if (!config || !config.logChannelId || config.ignoredChannels.includes(message.channel.id)) return;
 
     const logChannel = message.guild.channels.cache.get(config.logChannelId);
     if (logChannel) {
         let executor = "غير معروف";
         try {
+            // جلب سجل التدقيق لمعرفة المسؤول عن الحذف
             const fetchedLogs = await message.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MessageDelete });
             const deletionLog = fetchedLogs.entries.first();
+            
             if (deletionLog && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
-                executor = deletionLog.creator.username;
+                // تحويل المسؤول عن الحذف إلى منشن حقيقي باستخدام المعرف ID
+                executor = `<@${deletionLog.executor.id}>`;
             }
-        } catch (e) { }
+        } catch (e) { 
+            console.error("فشل جلب سجل التدقيق للحذف:", e);
+        }
 
-        const embed = new EmbedBuilder().setAuthor({ name: '🗑️ رسالة محذوفة' }).setColor('#e74c3c')
+        // إذا قام كاتب الرسالة بحذف رسالته بنفسه، فلن يسجلها ديسكورد في الـ Audit Logs، لذا نضع منشن كاتب الرسالة كحاذف
+        if (executor === "غير معروف") {
+            // إذا مر الوقت أو لم يتم العثور على سجل، نفترض منطقياً أن الكاتب هو من حذفها
+            executor = `<@${message.author.id}>`;
+        }
+
+        // حماية من النصوص الطويلة جداً التي قد تعطل إرسال الـ Embed
+        const messageContent = message.content ? (message.content.length > 1000 ? message.content.slice(0, 1000) + '...' : message.content) : '*ميديا/ملف*';
+
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: ' رسالة محذوفة' })
+            .setColor('#e74c3c')
             .addFields(
-                { name: '👤 كاتب الرسالة:', value: `${message.author.username}`, inline: true },
-                { name: '👮 الحاذف:', value: `${executor}`, inline: true },
-                { name: '📺 في روم:', value: `#${message.channel.name}`, inline: true },
-                { name: '📄 المحتوى:', value: message.content || '*ميديا*' }
+                { name: ' كاتب الرسالة:', value: `<@${message.author.id}>`, inline: true }, // منشن الكاتب
+                { name: ' الحاذف:', value: executor, inline: true },                     // منشن الحاذف
+                { name: ' في روم:', value: `<#${message.channel.id}>`, inline: true },      // منشن الروم
+                { name: ' المحتوى:', value: messageContent }
             ).setTimestamp();
-        logChannel.send({ embeds: [embed] });
+
+        logChannel.send({ embeds: [embed] }).catch(err => console.error("فشل إرسال لوق الحذف:", err));
     }
 });
+
 
 client.once('ready', () => console.log(`تم تشغيل البوت: ${client.user.tag}`));
 const port = process.env.PORT || 3000;
