@@ -133,7 +133,7 @@ app.get('/', (req, res) => {
     res.redirect('/login');
 });
 
-// --- صفحة التحكم باللوق للسيرفر المحدد ---
+// --- صفحة التحكم باللوق والتايم آوت للسيرفر المحدد ---
 app.get('/dashboard/manage/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
 
@@ -147,7 +147,12 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
     if (!guild) return res.send("البوت غادر السيرفر.");
 
     const db = loadConfig();
-    const config = db[guildId] || { logChannelId: "", ignoredChannels: [], timeoutChannelId: "", timeoutDuration: "1" };
+    
+    // حل المشكلة: تأمين وجود البنية الأساسية والمصفوفات كاملة حتى لو كان السيرفر جديداً ولم يحفظ سابقاً
+    if (!db[guildId]) db[guildId] = { logChannelId: "", ignoredChannels: [], timeoutChannelId: "", timeoutDuration: "1" };
+    const config = db[guildId];
+    if (!config.ignoredChannels) config.ignoredChannels = [];
+
     const allChannels = guild.channels.cache.filter(ch => ch.type === 0);
 
     let channelOptions = '';
@@ -249,8 +254,8 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
         </body>
         </html>
     `);
-
 });
+
 
 app.post('/dashboard/save/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
