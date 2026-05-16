@@ -203,7 +203,7 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
             <div class="sidebar">
                 <h3>${guild.name}</h3>
                 <a onclick="switchTab('log-settings')" id="btn-log-settings" class="active">📝 إعدادات اللوق</a>
-                <a onclick="switchTab('timeout-settings')" id="btn-timeout-settings">⏳ اختصار الخنق</a>
+                
                 <a href="/dashboard/servers" class="back-btn">⬅️ السيرفرات</a>
             </div>
 
@@ -223,26 +223,7 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
                     </form>
                 </div>
 
-                <!-- الصفحة الثانية: إعدادات أمر اختصار الخنق -->
-                <div id="timeout-settings" class="tab-content">
-                    <h2>⏳ إعدادات أمر اختصار الخنق</h2>
-                    <p style="color: #b9bbbe; font-size: 14px;">عند كتابة الأمر !خنق في السيرفر، سيقوم البوت بتطبيق التايم آوت وإرسال إمبيد العقوبة في الروم المحددة.</p>
-                    <form action="/dashboard/save/${guildId}" method="POST">
-                        <input type="hidden" name="formType" value="timeout">
-                        
-                        <label>روم إرسال إمبيد التايم آوت:</label>
-                        <select name="timeoutChannelId">
-                            <option value="">-- اختر روم --</option>
-                            ${allChannels.map(ch => `<option value="${ch.id}" ${config.timeoutChannelId === ch.id ? 'selected' : ''}>#${ch.name}</option>`).join('')}
-                        </select>
-
-                        <label>مدة الخنق الافتراضية (بالدقائق):</label>
-                        <input type="number" name="timeoutDuration" min="1" max="40320" value="${config.timeoutDuration || '1'}" placeholder="مثال: 1">
-
-                        <button type="submit" style="background: #43b581;">حفظ إعدادات الخنق</button>
-                    </form>
-                </div>
-
+          
             </div>
 
             <!-- كود جافاسكريبت لتبديل الصفحات داخل لوحة التحكم بدون إعادة تحميل -->
@@ -310,13 +291,19 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 });
 
 client.on('messageDelete', async (message) => {
-    // جلب بيانات الرسالة كاملة إذا لم تكن مخزنة في الذاكرة المؤقتة للبوت
+    // محاولة جلب بيانات الرسالة كاملة إذا لم تكن مخزنة في الذاكرة المؤقتة (Cache)
     if (message.partial) {
-        try { await message.fetch(); } catch (e) { return; }
+        try { 
+            await message.fetch(); 
+        } catch (e) { 
+            // إذا فشل الجلب لأن الرسالة قديمة جداً، لن نقوم بعمل return؛ الكود سيكمل عمله طبيعياً
+            console.log("تم حذف رسالة قديمة جداً (خارج ذاكرة البوت) وتمت معالجتها بنجاح.");
+        }
     }
 
-    // إذا كان كاتب الرسالة هو البوت الخاص بك نفسه، أو لم تكن الرسالة داخل سيرفر، تجاهلها
-    if (message.author?.id === client.user.id || !message.guild) return;
+    // حماية: إذا استطعنا جلب الكاتب وكان هو البوت نفسه، نتجاهلها
+    if (message.author && message.author.id === client.user.id) return;
+    if (!message.guild) return;
 
     const db = loadConfig();
     const config = db[message.guild.id];
@@ -325,35 +312,38 @@ client.on('messageDelete', async (message) => {
     const logChannel = message.guild.channels.cache.get(config.logChannelId);
     if (logChannel) {
         let executor = "غير معروف";
-        
+
         try {
-            // جلب سجل التدقيق الأخير لمعرفة المسؤول عن الحذف
+            // جلب سجل التدقيق الأخير الخاص بحذف الرسائل فقط
             const fetchedLogs = await message.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MessageDelete });
             const deletionLog = fetchedLogs.entries.first();
 
-            // فحص ذكي: إذا وجدنا سجل تدقيق للحذف تم إنشاؤه في آخر 5 ثوانٍ، وكان المستهدف فيه هو صاحب الرسالة
-            if (deletionLog && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
-                // نضع منشن المشرف الحاذف الفعلي
+            // فحص ذكي وآمن للتعرف على المشرف الحاذف أو صاحب الرسالة
+            if (deletionLog && message.author && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
                 executor = `<@${deletionLog.executor.id}>`;
             } else {
-                // إذا لم نجد سجل تدقيق حديث، فهذا يعني منطقياً بنسبة 100% أن صاحب الرسالة حذفها بنفسه (لأن ديسكورد لا يصنع سجل لحذف الشخص لرسالته)
-                executor = `<@${message.author.id}>`;
+                executor = message.author ? `<@${message.author.id}>` : "صاحب الرسالة";
             }
         } catch (e) {
-            // في حال فشل جلب الـ Logs بسبب صلاحيات أو بطء، نفترض الافتراض الآمن وهو كاتب الرسالة
-            executor = `<@${message.author.id}>`;
+            executor = message.author ? `<@${message.author.id}>` : "غير معروف";
         }
 
-        // حماية من النصوص الطويلة جداً التي قد تعطل إرسال الـ Embed
-        const messageContent = message.content ? (message.content.length > 1000 ? message.content.slice(0, 1000) + '...' : message.content) : '*ميديا/ملف*';
+        // صياغة محتوى الرسالة بشكل آمن لحماية الـ Embed من الانهيار في حال كانت الرسالة قديمة ومحتواها مفقود
+        let messageContent = '*ميديا/ملف أو رسالة قديمة جداً غير مخزنة*';
+        if (message.content) {
+            messageContent = message.content.length > 1000 ? message.content.slice(0, 1000) + '...' : message.content;
+        }
+
+        // صياغة منشن كاتب الرسالة بشكل آمن
+        const authorMention = message.author ? `<@${message.author.id}>` : "حساب غير مخزن (قديم)";
 
         const embed = new EmbedBuilder()
             .setAuthor({ name: ' رسالة محذوفة' })
             .setColor('#e74c3c')
             .addFields(
-                { name: ' كاتب الرسالة:', value: `<@${message.author.id}>`, inline: true }, // منشن الكاتب
-                { name: ' الحاذف:', value: executor, inline: true },                     // منشن الحاذف الفعلي (مشرف أو الكاتب نفسه)
-                { name: ' في روم:', value: `<#${message.channel.id}>`, inline: true },      // منشن الروم قابل للضغط
+                { name: ' كاتب الرسالة:', value: authorMention, inline: true }, 
+                { name: ' الحاذف:', value: executor, inline: true },                     
+                { name: ' في روم:', value: `<#${message.channel.id}>`, inline: true },      
                 { name: ' المحتوى:', value: messageContent }
             ).setTimestamp();
 
