@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const fetch = require('node-fetch');
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
