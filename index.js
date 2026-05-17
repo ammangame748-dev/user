@@ -32,14 +32,14 @@ function saveConfig(data) {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.Guildget,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildMembers // تم تفعيل هذا الانتن مهم جداً لمراقبة التايم آوت وتحديثات الأعضاء
+        GatewayIntentBits.GuildMembers // تم تصحيح الخطأ الإملائي هنا وحذف الحقل الخاطئ
     ],
     partials: [Partials.Message, Partials.Channel] 
 });
+
 
 app.get('/login', (req, res) => {
     const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
