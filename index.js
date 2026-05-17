@@ -119,22 +119,24 @@ app.get('/dashboard/servers', (req, res) => {
     `);
 });
 
-// صفحة البداية الرئيسية: تعرض زر تسجيل دخول فخم بدلاً من التحويل التلقائي لتفادي خطأ المتصفح
 app.get('/', (req, res) => {
-    const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
+    // تم تبسيط الرابط وتنظيفه تماماً لتجنب حظر المتصفحات
+    const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify+guilds`;
     
     res.send(`
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>لوحة تحكم البوت</title>
             <style>
                 body { font-family: sans-serif; background: #2f3136; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .login-container { text-align: center; background: #202225; padding: 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); max-width: 400px; width: 100%; }
                 h2 { margin-bottom: 20px; color: #fff; }
-                p { color: #b9bbbe; margin-bottom: 30px; font-size: 14px; }
-                .login-btn { display: inline-block; background: #5865f2; color: white; text-decoration: none; padding: 14px 30px; font-size: 16px; font-weight: bold; border-radius: 5px; transition: background 0.2s; }
+                p { color: #b9bbbe; margin-bottom: 30px; font-size: 14px; line-height: 1.6; }
+                /* تعديل الزر ليعمل كـ block كامل ويفتح بنفس الصفحة */
+                .login-btn { display: block; background: #5865f2; color: white; text-decoration: none; padding: 14px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; transition: background 0.2s; cursor: pointer; }
                 .login-btn:hover { background: #4752c4; }
             </style>
         </head>
@@ -142,6 +144,7 @@ app.get('/', (req, res) => {
             <div class="login-container">
                 <h2>لوحة تحكم البوت الرسمية</h2>
                 <p>يرجى تسجيل الدخول باستخدام حسابك في ديسكورد لإدارة سيرفراتك وتعديل إعدادات اللوق والتايم آوت.</p>
+                <!-- تم حذف target="_blank" وجعل الرابط يفتح مباشرة في نفس الصفحة ليتخطى حظر الحماية -->
                 <a href="${authorizeUrl}" class="login-btn">تسجيل الدخول بواسطة Discord</a>
             </div>
         </body>
@@ -149,10 +152,10 @@ app.get('/', (req, res) => {
     `);
 });
 
-// مسار الـ /login الاحتياطي في حال تم طلبه مباشرة، ليقوم بنقل المستخدم فوراً لصفحة البداية
 app.get('/login', (req, res) => {
     res.redirect('/');
 });
+
 
 
 // --- صفحة التحكم المحدثة بالنظامين اللوق والتايم آوت ---
