@@ -19,7 +19,7 @@ const CONFIG_FILE = path.join(__dirname, 'progress.json');
 
 const CLIENT_ID = process.env.CLIENT_ID || "1501846584961532004";
 const CLIENT_SECRET = process.env.CLIENT_SECRET || "lKyk-Mjv8FYAQMCXhPw0kd2A0-RoqX2W";
-const REDIRECT_URI = process.env.REDIRECT_URI || "https://zone-bot-xfli.onrender.com/callback";
+const REDIRECT_URI = process.env.REDIRECT_URI || "https://user-q5p3.onrender.com/auth/callback";
 
 function loadConfig() {
     if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}));
