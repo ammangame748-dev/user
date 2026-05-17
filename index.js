@@ -35,12 +35,12 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildMembers // تم تصحيح الخطأ الإملائي هنا وحذف الحقل الخاطئ
+        GatewayIntentBits.GuildMembers
     ],
     partials: [Partials.Message, Partials.Channel] 
 });
 
-
+// رجعنا التوجيه التلقائي القديم زي ما كان بالظبط
 app.get('/login', (req, res) => {
     const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
     res.redirect(authorizeUrl);
@@ -119,46 +119,8 @@ app.get('/dashboard/servers', (req, res) => {
     `);
 });
 
-app.get('/', (req, res) => {
-    // تم تبسيط الرابط وتنظيفه تماماً لتجنب حظر المتصفحات
-    const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify+guilds`;
-    
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ar" dir="rtl">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>لوحة تحكم البوت</title>
-            <style>
-                body { font-family: sans-serif; background: #2f3136; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                .login-container { text-align: center; background: #202225; padding: 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); max-width: 400px; width: 100%; }
-                h2 { margin-bottom: 20px; color: #fff; }
-                p { color: #b9bbbe; margin-bottom: 30px; font-size: 14px; line-height: 1.6; }
-                /* تعديل الزر ليعمل كـ block كامل ويفتح بنفس الصفحة */
-                .login-btn { display: block; background: #5865f2; color: white; text-decoration: none; padding: 14px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; transition: background 0.2s; cursor: pointer; }
-                .login-btn:hover { background: #4752c4; }
-            </style>
-        </head>
-        <body>
-            <div class="login-container">
-                <h2>لوحة تحكم البوت الرسمية</h2>
-                <p>يرجى تسجيل الدخول باستخدام حسابك في ديسكورد لإدارة سيرفراتك وتعديل إعدادات اللوق والتايم آوت.</p>
-                <!-- تم حذف target="_blank" وجعل الرابط يفتح مباشرة في نفس الصفحة ليتخطى حظر الحماية -->
-                <a href="${authorizeUrl}" class="login-btn">تسجيل الدخول بواسطة Discord</a>
-            </div>
-        </body>
-        </html>
-    `);
-});
+app.get('/', (req, res) => { res.redirect('/login'); });
 
-app.get('/login', (req, res) => {
-    res.redirect('/');
-});
-
-
-
-// --- صفحة التحكم المحدثة بالنظامين اللوق والتايم آوت ---
 app.get('/dashboard/manage/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
 
@@ -218,34 +180,32 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
 
             <div class="sidebar">
                 <h3>${guild.name}</h3>
-                <a onclick="switchTab('log-settings')" id="btn-log-settings" class="active">إعدادات اللوق</a>
-                <a onclick="switchTab('timeout-settings')" id="btn-timeout-settings">إعدادات التايم آوت</a>
-                <a href="/dashboard/servers" class="back-btn">السيرفرات</a>
+                <a onclick="switchTab('log-settings')" id="btn-log-settings" class="active">📝 إعدادات اللوق</a>
+                <a onclick="switchTab('timeout-settings')" id="btn-timeout-settings">⏳ إعدادات التايم آوت</a>
+                <a href="/dashboard/servers" class="back-btn">⬅️ السيرفرات</a>
             </div>
 
             <div class="main-content">
                 
-                <!-- صفحة إعدادات اللوق -->
                 <div id="log-settings" class="tab-content active">
-                    <h2>إعدادات اللوق الرئيسية</h2>
+                    <h2>📝 إعدادات اللوق الرئيسية</h2>
                     <form action="/dashboard/save/${guildId}" method="POST">
                         <input type="hidden" name="formType" value="logs">
                         <label>روم إرسال اللوق الرئيسية:</label>
                         <select name="logChannelId"><option value="">-- اختر روم --</option>${channelOptionsLogs}</select>
                         <h3>الرومات المراد مراقبتها:</h3>
                         ${channelCheckboxes}
-                        <button type="submit">حفظ تغييرات اللوق</button>
+                        <button type="submit">حفظ التغييرات</button>
                     </form>
                 </div>
 
-                <!-- صفحة إعدادات التايم آوت الجديدة -->
                 <div id="timeout-settings" class="tab-content">
-                    <h2>إعدادات لوق التايم آوت</h2>
+                    <h2>⏳ إعدادات لوق التايم آوت</h2>
                     <form action="/dashboard/save/${guildId}" method="POST">
                         <input type="hidden" name="formType" value="timeout">
                         <label>روم سجل التايم آوت المخصص:</label>
                         <select name="timeoutChannelId"><option value="">-- اختر روم --</option>${channelOptionsTimeout}</select>
-                        <button type="submit">حفظ تغييرات التايم آوت</button>
+                        <button type="submit">حفظ التغييرات</button>
                     </form>
                 </div>
 
@@ -265,7 +225,6 @@ app.get('/dashboard/manage/:guildId', (req, res) => {
     `);
 });
 
-// --- تعديل مسار الحفظ ليدعم تحديث نظام اللوق ونظام التايم آوت بشكل منفصل وآمن ---
 app.post('/dashboard/save/:guildId', (req, res) => {
     if (!req.session.userGuilds) return res.redirect('/login');
     const guildId = req.params.guildId;
@@ -297,7 +256,6 @@ app.post('/dashboard/save/:guildId', (req, res) => {
     res.send(`<script>alert('تم الحفظ بنجاح!'); window.location='/dashboard/manage/${guildId}';</script>`);
 });
 
-// --- أحداث اللوق السابقة ---
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.author?.id === client.user.id || oldMessage.content === newMessage.content || !oldMessage.guild) return;
     const db = loadConfig(); const config = db[oldMessage.guild.id];
@@ -350,71 +308,45 @@ client.on('messageDelete', async (message) => {
     }
 });
 
-
-// --- الحدث الجديد لـ (التايم آوت): مرتب، فخم، وبدون أي إيموجي بالـ Embed ---
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    // التحقق من حالة التايم آوت (إذا تغير حقل communicationDisabledUntilTimestamp)
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
+    if (oldTimeout === newTimeout) return;
 
-    if (oldTimeout === newTimeout) return; // لم يتغير شيء بخصوص التايم آوت
-
-    const db = loadConfig();
-    const config = db[newMember.guild.id];
+    const db = loadConfig(); const config = db[newMember.guild.id];
     if (!config || !config.timeoutChannelId) return;
 
     const logChannel = newMember.guild.channels.cache.get(config.timeoutChannelId);
     if (!logChannel) return;
 
-    // حالة إعطاء تايم آوت جديد
     if (newTimeout && newTimeout > Date.now()) {
-        let executor = "غير معروف";
-        let reason = "لم يتم تحديد سبب";
-
+        let executor = "غير معروف"; let reason = "لم يتم تحديد سبب";
         try {
-            // جلب سجلات التدقيق الخاصة بالـ Member Update للتعرف على المشرف والسبب
             const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
             const auditLog = fetchedLogs.entries.first();
-
             if (auditLog && auditLog.target.id === newMember.id && (Date.now() - auditLog.createdTimestamp) < 5000) {
-                executor = `<@${auditLog.executor.id}>`;
-                if (auditLog.reason) reason = auditLog.reason;
+                executor = `<@${auditLog.executor.id}>`; if (auditLog.reason) reason = auditLog.reason;
             }
-        } catch (e) {
-            console.error("فشل جلب الأوديت لوق الخاص بالتايم آوت:", e);
-        }
+        } catch (e) {}
 
-        // حساب المدة المتبقية بدقائق تقريبية وتنسيق الوقت المستهدف بالديسكورد
-        const durationMs = newTimeout - Date.now();
-        const durationMinutes = Math.round(durationMs / 60000);
-        
+        const durationMinutes = Math.round((newTimeout - Date.now()) / 60000);
         let durationText = `${durationMinutes} دقيقة`;
         if (durationMinutes >= 60) {
-            const hours = Math.round(durationMinutes / 60);
-            durationText = `${hours} ساعة`;
-            if (hours >= 24) {
-                durationText = `${Math.round(hours / 24)} يوم`;
-            }
+            const hours = Math.round(durationMinutes / 60); durationText = `${hours} ساعة`;
+            if (hours >= 24) durationText = `${Math.round(hours / 24)} يوم`;
         }
 
-        const embed = new EmbedBuilder()
-            .setAuthor({ name: 'تطبيق عقوبة التايم آوت' })
-            .setColor('#e67e22') // لون برتقالي مميز ومرتب
+        const embed = new EmbedBuilder().setAuthor({ name: 'تطبيق عقوبة التايم آوت' }).setColor('#e67e22')
             .addFields(
                 { name: 'العضو المستهدف:', value: `<@${newMember.id}>`, inline: true },
                 { name: 'بواسطة المشرف:', value: executor, inline: true },
                 { name: 'مدة العقوبة:', value: durationText, inline: true },
                 { name: 'ينتهي الوقت في:', value: `<t:${Math.floor(newTimeout / 1000)}:F>`, inline: false },
                 { name: 'السبب:', value: reason, inline: false }
-            )
-            .setTimestamp();
-
+            ).setTimestamp();
         logChannel.send({ embeds: [embed] });
-    } 
-    // حالة فك التايم آوت (إذا كان يملك تايم آوت سابق والآن تم إزالته قبل وقته)
-    else if (oldTimeout && !newTimeout) {
+    } else if (oldTimeout && !newTimeout) {
         let executor = "غير معروف";
-
         try {
             const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
             const auditLog = fetchedLogs.entries.first();
@@ -423,26 +355,17 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             }
         } catch (e) {}
 
-        const embed = new EmbedBuilder()
-            .setAuthor({ name: 'إزالة عقوبة التايم آوت' })
-            .setColor('#2ecc71') // لون أخضر هادئ ومرتب للفك
+        const embed = new EmbedBuilder().setAuthor({ name: 'إزالة عقوبة التايم آوت' }).setColor('#2ecc71')
             .addFields(
                 { name: 'العضو المعفي عنه:', value: `<@${newMember.id}>`, inline: true },
                 { name: 'أزيلت بواسطة:', value: executor, inline: true }
-            )
-            .setTimestamp();
-
+            ).setTimestamp();
         logChannel.send({ embeds: [embed] });
     }
 });
 
-
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}`);
-});
-
+client.once('ready', () => { console.log(`Logged in as ${client.user.tag}`); });
+client.login(process.env.DISCORD_TOKEN);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Dashboard listening on port ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`Dashboard listening on port ${PORT}`); });
