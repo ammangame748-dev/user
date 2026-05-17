@@ -40,10 +40,26 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel] 
 });
 
-// رجعنا التوجيه التلقائي القديم زي ما كان بالظبط
+// حل مشكلة حلقة التوجيه نهائياً وبدون تعليق المتصفح
 app.get('/login', (req, res) => {
     const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
-    res.redirect(authorizeUrl);
+    
+    // هان بنخلّي المتصفح يوجّه نفسه بنفسه بدون تدخل السيرفر عشان الاستضافة ما تحظر الطلب
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>Redirecting...</title></head>
+        <body>
+            <script>
+                window.location.href = "${authorizeUrl}";
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+app.get('/', (req, res) => {
+    res.redirect('/login');
 });
 
 app.get('/auth/callback', async (req, res) => {
