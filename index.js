@@ -71,7 +71,7 @@ app.get('/', (req, res) => {
     res.redirect('/login');
 });
 
-app.get('/auth/callback', async (req, res) => {
+app.get('/callback', async (req, res) => {
     const code = req.query.code;
 
     if (!code) {
