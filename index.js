@@ -78,13 +78,13 @@ client.on('messageDelete', async (message) => {
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle('🗑️ لوق حذف رسالة جديد')
+        .setTitle(' لوق حذف رسالة جديد')
         .setColor('#ef4444')
         .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
         .addFields(
-            { name: '👤 المسؤول عن الحذف:', value: executor, inline: true },
-            { name: '✉️ صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
-            { name: '📄 نص الرسالة المحذوفة:', value: `\`\`\`${message.content || 'محتوى ميديا أو إيموجي فقط'}\`\`\`` }
+            { name: ' المسؤول عن الحذف:', value: executor, inline: true },
+            { name: ' صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
+            { name: ' نص الرسالة المحذوفة:', value: `\`\`\`${message.content || 'محتوى ميديا أو إيموجي فقط'}\`\`\`` }
         )
         .setThumbnail(executorTarget.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
