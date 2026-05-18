@@ -142,13 +142,13 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         const durationMinutes = Math.round((newTimeout - Date.now()) / 60000);
 
         const embed = new EmbedBuilder()
-            .setTitle('⏱️ لوق عقوبة تايم أوت (عام)')
+            .setTitle(' لوق عقوبة تايم أوت (عام)')
             .setColor('#38bdf8')
-            .setDescription(`تم تطبيق عقوبة برمجية زمنيّة على أحد الأعضاء`)
+            .setDescription(` تطبيق عقوبة  زمنيّة على أحد الأعضاء`)
             .addFields(
-                { name: '👮 من قام بإعطاء التايم أوت:', value: executor, inline: true },
-                { name: '👤 العضو المعاقب (لمين):', value: `<@${newMember.id}>`, inline: true },
-                { name: '⏳ مدة العقوبة الزمنيّة:', value: `\`${durationMinutes} دقيقة\``, inline: false }
+                { name: ' من قام بإعطاء التايم أوت:', value: executor, inline: true },
+                { name: ' العضو المعاقب (لمين):', value: `<@${newMember.id}>`, inline: true },
+                { name: ' مدة العقوبة الزمنيّة:', value: `\`${durationMinutes} دقيقة\``, inline: false }
             )
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
