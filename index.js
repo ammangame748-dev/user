@@ -147,7 +147,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setDescription(` تطبيق عقوبة  زمنيّة على أحد الأعضاء`)
             .addFields(
                 { name: ' من قام بإعطاء التايم أوت:', value: executor, inline: true },
-                { name: ' العضو المعاقب (لمين):', value: `<@${newMember.id}>`, inline: true },
+                { name: ' العضو المعاقب (تايم اوت):', value: `<@${newMember.id}>`, inline: true },
                 { name: ' مدة العقوبة الزمنيّة:', value: `\`${durationMinutes} دقيقة\``, inline: false }
             )
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
