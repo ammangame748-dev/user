@@ -1,15 +1,24 @@
 const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const express = require('express');
+const session = require('express-session');
+const axios = require('axios');
 require('dotenv').config({ silent: true });
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// إعداد الجلسات (Sessions) لتذكر تسجيل دخول المستخدم
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'secret-key-123',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false } // اجعلها true إذا كان موقعك يستخدم https حقيقي بشكل كامل ومباشر
+}));
+
 // ==========================================
-// 1. تخزين إعدادات كل سيرفر بشكل منفصل
+// 1. تخزين إعدادات السيرفرات في الذاكرة
 // ==========================================
-// البنية: { guildId: { messageLogChannelId, timeoutLogChannelId, monitoredRooms: { roomId: true/false } } }
 let guildSettings = {};
 
 const client = new Client({
@@ -23,14 +32,9 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-    console.log(`Bot initialized as: ${client.user.tag}`);
-    // تهيئة الإعدادات الافتراضية للسيرفرات المتصلة
-    client.guilds.cache.forEach(guild => {
-        initGuildSettings(guild.id);
-    });
+    console.log(`Bot connected: ${client.user.tag}`);
 });
 
-// دالة لتهيئة إعدادات سيرفر معين إن لم تكن موجودة
 function initGuildSettings(guildId) {
     if (!guildSettings[guildId]) {
         guildSettings[guildId] = {
@@ -44,25 +48,20 @@ function initGuildSettings(guildId) {
         const textChannels = guild.channels.cache.filter(c => c.type === 0);
         textChannels.forEach(channel => {
             if (guildSettings[guildId].monitoredRooms[channel.id] === undefined) {
-                guildSettings[guildId].monitoredRooms[channel.id] = true; // تفعيل افتراضي
+                guildSettings[guildId].monitoredRooms[channel.id] = true;
             }
         });
     }
 }
 
 // ==========================================
-// 2. أحداث الديسكورد النظيفة وبدون إيموجي
+// 2. أحداث الديسكورد النظيفة (بدون إيموجي)
 // ==========================================
 
-// [حدث حذف الرسالة]
 client.on('messageDelete', async (message) => {
     if (message.partial || message.author?.bot || !message.guild) return;
-
     const settings = guildSettings[message.guild.id];
-    if (!settings) return;
-
-    // التحقق هل الروم مفعلة بالصح
-    if (!settings.monitoredRooms[message.channel.id]) return;
+    if (!settings || !settings.monitoredRooms[message.channel.id]) return;
 
     const logChannel = message.guild.channels.cache.get(settings.messageLogChannelId);
     if (!logChannel) return;
@@ -96,7 +95,6 @@ client.on('messageDelete', async (message) => {
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// [حدث تعديل الرسالة]
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
     if (oldMessage.content === newMessage.content) return;
@@ -122,7 +120,6 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// [حدث التايم أوت وفك التايم أوت العام]
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     if (!oldMember.guild) return;
     const settings = guildSettings[oldMember.guild.id];
@@ -134,7 +131,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
-    // حالة 1: إعطاء تايم أوت جديد
     if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
         let executor = 'مشرف مجهول';
         try {
@@ -158,18 +154,14 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
         logChannel.send({ embeds: [embed] }).catch(() => {});
     } 
-    // حالة 2: فك التايم أوت (إما يدوي أو انتهاء المدة)
     else if (oldTimeout && oldTimeout > Date.now() && (!newTimeout || newTimeout <= Date.now())) {
         let executor = 'نظام ديسكورد التلقائي (انتهاء المدة)';
         try {
             const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
             const auditEntry = fetchedLogs.entries.first();
-            // التحقق من أن الإجراء هو فك التايم أوت يدوياً عبر المشرف
             if (auditEntry && auditEntry.target.id === newMember.id) {
                 const change = auditEntry.changes.find(c => c.key === 'communication_disabled_until');
-                if (change && change.old && !change.new) {
-                    executor = `<@${auditEntry.executor.id}>`;
-                }
+                if (change && change.old && !change.new) executor = `<@${auditEntry.executor.id}>`;
             }
         } catch (e) {}
 
@@ -188,36 +180,115 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 
 // ==========================================
-// 3. سيرفر الويب والداش بورد الاحترافي
+// 3. نظام تسجيل الدخول عبر ديسكورد (OAuth2)
 // ==========================================
 
-// مسار عرض قائمة السيرفرات المتصلة والغير متصلة
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI;
+
+// رابط تسجيل الدخول الموجه لديسكورد
+app.get('/login', (req, res) => {
+    const authorizeUrl = `https://discord.com{CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
+    res.redirect(authorizeUrl);
+});
+
+// استقبال ديسكورد بعد نجاح الدخول وجلب السيرفرات الشخصية للمستخدم
+app.get('/api/auth/callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.send('خطأ في عملية تسجيل الدخول.');
+
+    try {
+        // 1. تبديل الكود بـ Access Token
+        const tokenResponse = await axios.post('https://discord.com', new URLSearchParams({
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            code: code,
+            redirect_uri: REDIRECT_URI
+        }), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+
+        const accessToken = tokenResponse.data.access_token;
+
+        // 2. جلب سيرفرات المستخدم الشخصية
+        const guildsResponse = await axios.get('https://discord.com', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        // 3. تصفية السيرفرات: نبقي فقط السيرفرات التي يملك فيها صلاحية الـ Administrator (0x8)
+        const adminGuilds = guildsResponse.data.filter(guild => {
+            const permissions = BigInt(guild.permissions);
+            return (permissions & BigInt(0x8)) === BigInt(0x8); // 0x8 تعني Administrator
+        });
+
+        // حفظ السيرفرات المسموحة في جلسة المستخدم الحالي
+        req.session.userGuilds = adminGuilds;
+        req.session.loggedIn = true;
+
+        res.redirect('/dashboard');
+    } catch (error) {
+        console.error(error.response ? error.response.data : error.message);
+        res.send('فشل الاتصال بخوادم ديسكورد أثناء جلب البيانات.');
+    }
+});
+
+// تسجيل الخروج
+app.get('/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/dashboard');
+});
+
+// ==========================================
+// 4. مسارات الداش بورد المخصصة للسيرفرات الإدارية
+// ==========================================
+
 app.get('/', (req, res) => res.redirect('/dashboard'));
 
 app.get('/dashboard', (req, res) => {
-    // محاكاة قائمة السيرفرات (بحكم عدم ربط OAuth كامل لتسهيل الكود، يظهر سيرفرات البوت الحالية لربط الإدارة المباشرة)
-    let botGuilds = client.guilds.cache.map(g => ({ id: g.id, name: g.name, hasBot: true, icon: g.iconURL() }));
-    
-    res.send(getGuildSelectorHtml(botGuilds));
+    if (!req.session.loggedIn || !req.session.userGuilds) {
+        return res.send(getLoginScreenHtml());
+    }
+
+    // مطابقة سيرفرات المستخدم الإدارية مع السيرفرات المتواجد بها البوت حالياً
+    let formattedGuilds = req.session.userGuilds.map(g => {
+        const botHasGuild = client.guilds.cache.has(g.id);
+        const iconUrl = g.icon ? `https://discordapp.com{g.id}/${g.icon}.png` : 'https://discordapp.com';
+        return {
+            id: g.id,
+            name: g.name,
+            hasBot: botHasGuild,
+            icon: iconUrl
+        };
+    });
+
+    res.send(getGuildSelectorHtml(formattedGuilds));
 });
 
-// مسار التحكم بسيرفر معين
+// حماية المسار: التأكد أن المستخدم أدمن بالسيرفر المطلوب قبل فتح التحكم
 app.get('/dashboard/manage/:guildId', (req, res) => {
     const guildId = req.params.guildId;
+    if (!req.session.loggedIn || !req.session.userGuilds) return res.redirect('/dashboard');
+
+    const isUserAdmin = req.session.userGuilds.some(g => g.id === guildId);
+    if (!isUserAdmin) return res.status(403).send('غير مصرح لك بالتحكم بهذا السيرفر، لست مسؤلاً فيه.');
+
     const guild = client.guilds.cache.get(guildId);
-    if (!guild) return res.send('السيرفر غير موجود أو لم يتم العثور على البوت فيه.');
+    if (!guild) return res.send('البوت ليس متواجداً في هذا السيرفر حالياً.');
 
     initGuildSettings(guildId);
     const settings = guildSettings[guildId];
-
     const textChannels = guild.channels.cache.filter(c => c.type === 0).map(c => ({ id: c.id, name: c.name }));
 
     res.send(getManageServerHtml(guild, textChannels, settings));
 });
 
-// استقبال تحديثات سيرفر محدد
 app.post('/dashboard/update/:guildId', (req, res) => {
     const guildId = req.params.guildId;
+    if (!req.session.loggedIn || !req.session.userGuilds) return res.redirect('/dashboard');
+
+    const isUserAdmin = req.session.userGuilds.some(g => g.id === guildId);
+    if (!isUserAdmin) return res.status(403).send('إجراء غير مصرح به.');
+
     const { enabledMessageRooms, mainMessageChannel, mainTimeoutChannel } = req.body;
 
     if (!guildSettings[guildId]) initGuildSettings(guildId);
@@ -226,8 +297,6 @@ app.post('/dashboard/update/:guildId', (req, res) => {
     guildSettings[guildId].timeoutLogChannelId = mainTimeoutChannel || "";
 
     const msgRooms = Array.isArray(enabledMessageRooms) ? enabledMessageRooms : (enabledMessageRooms ? [enabledMessageRooms] : []);
-    
-    // تصفير وتحديث غرف المراقبة للسيرفر المذكور
     for (let roomId in guildSettings[guildId].monitoredRooms) {
         guildSettings[guildId].monitoredRooms[roomId] = msgRooms.includes(roomId);
     }
@@ -235,27 +304,69 @@ app.post('/dashboard/update/:guildId', (req, res) => {
     res.redirect(`/dashboard/manage/${guildId}`);
 });
 
+if (process.env.DISCORD_TOKEN) {
+    client.login(process.env.DISCORD_TOKEN).catch(err => console.error(err.message));
+}
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Secure server running on port ${PORT}`));
 
 // ==========================================
-// 4. قوالب واجهات الـ HTML للتصميم المودرن
+// 5. واجهات الـ HTML للتصميم الاحترافي والغامق
 // ==========================================
 
-function getGuildSelectorHtml(botGuilds) {
-    // كود الرابط التلقائي لإضافة البوت لسيرفر جديد
+function getLoginScreenHtml() {
+    return `
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>سجيل الدخول | لوحة التحكم</title>
+        <style>
+            body { background: #0f172a; color: #fff; font-family: 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .login-card { background: #1e293b; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.4); max-width: 400px; width: 100%; border: 1px solid #334155; }
+            h2 { margin-bottom: 10px; font-size: 24px; color: #38bdf8; }
+            p { color: #94a3b8; font-size: 14px; margin-bottom: 30px; }
+            .login-btn { background: #5865F2; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; display: block; transition: 0.2s; }
+            .login-btn:hover { background: #4752C4; }
+        </style>
+    </head>
+    <body>
+        <div class="login-card">
+            <h2>لوحة التحكم المتقدمة</h2>
+            <p>يرجى تسجيل الدخول بحساب ديسكورد الخاص بك للتحكم بالسيرفرات التي تمتلك رتبة مسؤول فيها.</p>
+            <a href="/login" class="login-btn">تسجيل الدخول بواسطة Discord</a>
+        </div>
+    </body>
+    </html>`;
+}
+
+function getGuildSelectorHtml(guildsList) {
     const botInviteUrl = `https://discord.com{client.user ? client.user.id : ''}&permissions=8&scope=bot`;
 
-    let cardsHtml = botGuilds.map(g => `
-        <div class="server-card">
-            <img class="server-icon" src="${g.icon || 'https://discordapp.com'}" alt="">
-            <div class="server-details">
-                <h3>${g.name}</h3>
-                <span class="status-tag status-online">متصل وجاهز</span>
-            </div>
-            <a href="/dashboard/manage/${g.id}" class="ctrl-btn text-dark">تحكم بالسيرفر</a>
-        </div>
-    `).join('');
+    let cardsHtml = guildsList.map(g => {
+        if (g.hasBot) {
+            return `
+            <div class="server-card">
+                <img class="server-icon" src="${g.icon}" alt="">
+                <div class="server-details">
+                    <h3>${g.name}</h3>
+                    <span class="status-tag online">البوت متصل</span>
+                </div>
+                <a href="/dashboard/manage/${g.id}" class="ctrl-btn managed">تحكم بالسيرفر</a>
+            </div>`;
+        } else {
+            return `
+            <div class="server-card no-bot">
+                <img class="server-icon" src="${g.icon}" alt="">
+                <div class="server-details">
+                    <h3>${g.name}</h3>
+                    <span class="status-tag offline">البوت غير متواجد</span>
+                </div>
+                <a href="${botInviteUrl}&guild_id=${g.id}" target="_blank" class="ctrl-btn invite">إضافة البوت</a>
+            </div>`;
+        }
+    }).join('');
 
     return `
     <!DOCTYPE html>
@@ -266,32 +377,38 @@ function getGuildSelectorHtml(botGuilds) {
         <style>
             :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; }
             * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { background: var(--bg-p); color: var(--text); padding: 5px; }
+            body { background: var(--bg-p); color: var(--text); }
             .container { max-width: 1000px; margin: 60px auto; padding: 0 20px; }
             header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid var(--bg-a); padding-bottom: 20px; }
             h1 { font-size: 26px; font-weight: 800; }
-            .invite-btn { background: var(--blue); color: var(--bg-p); padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; }
+            .logout-btn { background: #ef4444; color: #fff; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; }
             .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
             .server-card { background: var(--bg-s); border: 1px solid var(--bg-a); border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 15px; }
+            .server-card.no-bot { border-style: dashed; opacity: 0.8; }
             .server-icon { width: 60px; height: 60px; border-radius: 50%; background: var(--bg-a); }
             .server-details { flex-grow: 1; }
             .server-details h3 { font-size: 16px; margin-bottom: 4px; }
-            .status-tag { font-size: 12px; font-weight: bold; color: #22c55e; }
-            .ctrl-btn { background: var(--bg-a); color: var(--text); padding: 8px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; transition: 0.2s; }
-            .ctrl-btn:hover { background: var(--blue); color: var(--bg-p); }
+            .status-tag { font-size: 12px; font-weight: bold; }
+            .status-tag.online { color: #22c55e; }
+            .status-tag.offline { color: #94a3b8; }
+            .ctrl-btn { padding: 8px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; transition: 0.2s; }
+            .ctrl-btn.managed { background: var(--bg-a); color: var(--text); }
+            .ctrl-btn.managed:hover { background: var(--blue); color: var(--bg-p); }
+            .ctrl-btn.invite { background: #5865F2; color: #fff; }
+            .ctrl-btn.invite:hover { background: #4752C4; }
         </style>
     </head>
     <body>
         <div class="container">
             <header>
                 <div>
-                    <h1>لوحة الإدارة المركزية للبوت</h1>
-                    <p style="color: var(--text-m); font-size:14px; margin-top:5px;">اختر السيرفر المستهدف لتخصيص خيارات الفلاتر واستلام السجلات.</p>
+                    <h1>سيرفراتك الإدارية</h1>
+                    <p style="color: var(--text-m); font-size:14px; margin-top:5px;">هذه القائمة مأخوذة مباشرة من حسابك؛ حيث تظهر السيرفرات التي تحمل فيها رتبة مسؤول فقط.</p>
                 </div>
-                <a href="${botInviteUrl}" target="_blank" class="invite-btn">إضافة البوت لسيرفر آخر</a>
+                <a href="/logout" class="logout-btn">تسجيل الخروج</a>
             </header>
             <div class="server-grid">
-                ${cardsHtml || '<p style="color:var(--text-m);">لم يتم العثور على أي سيرفرات متصلة بالبوت حالياً.</p>'}
+                ${cardsHtml || '<p style="color:var(--text-m);">ليس لديك رتبة مسؤول (Administrator) في أي سيرفر حالياً.</p>'}
             </div>
         </div>
     </body>
