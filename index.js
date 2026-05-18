@@ -143,45 +143,14 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
-    // 1. حالة إعطاء تايم آوت جديد (خنق)
+    // 1. حالة إعطاء تايم آوت جديد
     if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
         let executor = 'مشرف مجهول';
-
         try {
-            // جلب سجل التدقيق لمعرفة من قام بالحركة برأي ديسكورد
             const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
             const auditEntry = fetchedLogs.entries.first();
-            
             if (auditEntry && auditEntry.target.id === newMember.id) {
-                // إذا كان المنفذ بوتاً (مثل فالور)، نبحث عن الشخص الحقيقي الذي منشن العضو المعاقب
-                if (auditEntry.executor.bot) {
-                    // جلب الرسائل الأخيرة من الروم الذي حدثت فيه العقوبة
-                    const textChannels = newMember.guild.channels.cache.filter(c => c.type === 0);
-                    
-                    for (const [_, channel] of textChannels) {
-                        try {
-                            const messages = await channel.messages.fetch({ limit: 5 });
-                            // البحث عن رسالة تحتوي كلمة خنق ومنشن للشخص المعاقب بالثانية والآيدي
-                            const triggerMessage = messages.find(m => 
-                                !m.author.bot && 
-                                m.content.includes('خنق') && 
-                                (m.mentions.users.has(newMember.id) || m.content.includes(newMember.id)) &&
-                                (Date.now() - m.createdTimestamp) < 30000 // كتبت في آخر 30 ثانية فقط
-                            );
-                            
-                            if (triggerMessage) {
-                                executor = `<@${triggerMessage.author.id}>`; // الشخص الحقيقي اللي كتب الأمر
-                                break;
-                            }
-                        } catch (e) {}
-                    }
-                    
-                    // إذا لم نجد الرسالة لأي سبب، نضع البوت المنفذ كبديل بدلاً من "مشرف مجهول"
-                    if (executor === 'مشرف مجهول') executor = `<@${auditEntry.executor.id}>`;
-                } else {
-                    // إذا تم إعطاء التايم آوت يدوياً بالماوس من مشرف حقيقي
-                    executor = `<@${auditEntry.executor.id}>`;
-                }
+                executor = `<@${auditEntry.executor.id}>`; // هيجيب البوت اللي أعطى الأمر مباشرة
             }
         } catch (e) { }
 
@@ -201,7 +170,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
         logChannel.send({ embeds: [embed] }).catch(() => { });
     }
-    // 2. حالة فك التايم آوت تترك كما هي دون تغيير
+    // 2. حالة فك التايم آوت
     else if (oldTimeout && oldTimeout > Date.now() && (!newTimeout || newTimeout <= Date.now())) {
         let executor = 'انتهاء مدة العقوبة التلقائي';
         try {
