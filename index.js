@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const express = require('express');
 require('dotenv').config({ silent: true });
 
@@ -7,11 +7,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // ==========================================
-// 1. متغيرات الإعدادات والذاكرة (حفظ الرومات المختارة)
+// 1. تخزين إعدادات كل سيرفر بشكل منفصل
 // ==========================================
-let rooms = [];              // قنوات السيرفر لجداول الصح والخطأ
-let messageLogChannelId = ""; // الروم التي سيرسل إليها البوت إمبيد الحذف والتعديل
-let timeoutLogChannelId = ""; // الروم التي سيرسل إليها البوت إمبيد التايم أوت
+// البنية: { guildId: { messageLogChannelId, timeoutLogChannelId, monitoredRooms: { roomId: true/false } } }
+let guildSettings = {};
 
 const client = new Client({
     intents: [
@@ -23,47 +22,52 @@ const client = new Client({
     ]
 });
 
-// عند تشغيل البوت بنجاح
-client.once('ready', async () => {
-    console.log(`Bot connected: ${client.user.tag}`);
-    refreshRoomsList();
+client.once('ready', () => {
+    console.log(`Bot initialized as: ${client.user.tag}`);
+    // تهيئة الإعدادات الافتراضية للسيرفرات المتصلة
+    client.guilds.cache.forEach(guild => {
+        initGuildSettings(guild.id);
+    });
 });
 
-// دالة لتحديث قائمة الرومات المتاحة للبوت
-function refreshRoomsList() {
-    let tempRooms = [];
-    client.guilds.cache.forEach(guild => {
+// دالة لتهيئة إعدادات سيرفر معين إن لم تكن موجودة
+function initGuildSettings(guildId) {
+    if (!guildSettings[guildId]) {
+        guildSettings[guildId] = {
+            messageLogChannelId: "",
+            timeoutLogChannelId: "",
+            monitoredRooms: {}
+        };
+    }
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
         const textChannels = guild.channels.cache.filter(c => c.type === 0);
         textChannels.forEach(channel => {
-            // المحافظة على الحالات السابقة للصح إن وجدت
-            const existing = rooms.find(r => r.id === channel.id);
-            tempRooms.push({
-                id: channel.id,
-                name: `${guild.name} ➔ #${channel.name}`,
-                messagesEnabled: existing ? existing.messagesEnabled : true
-            });
+            if (guildSettings[guildId].monitoredRooms[channel.id] === undefined) {
+                guildSettings[guildId].monitoredRooms[channel.id] = true; // تفعيل افتراضي
+            }
         });
-    });
-    rooms = tempRooms;
+    }
 }
 
 // ==========================================
-// 2. أحداث الديسكورد (Discord Events) وإرسال الإمبيدات
+// 2. أحداث الديسكورد النظيفة وبدون إيموجي
 // ==========================================
 
 // [حدث حذف الرسالة]
 client.on('messageDelete', async (message) => {
-    if (message.partial || message.author?.bot) return;
+    if (message.partial || message.author?.bot || !message.guild) return;
 
-    // التأكد هل الروم التي تم الحذف فيها مفعلة (عليها صح) بالداش بورد؟
-    const roomConfig = rooms.find(r => r.id === message.channel.id);
-    if (!roomConfig || !roomConfig.messagesEnabled) return;
+    const settings = guildSettings[message.guild.id];
+    if (!settings) return;
 
-    // التأكد من تحديد روم لإرسال اللوق إليها
-    const targetLogChannel = client.channels.cache.get(messageLogChannelId);
-    if (!targetLogChannel) return;
+    // التحقق هل الروم مفعلة بالصح
+    if (!settings.monitoredRooms[message.channel.id]) return;
 
-    let executor = "غير معروف (حذف ذاتي غالباً)";
+    const logChannel = message.guild.channels.cache.get(settings.messageLogChannelId);
+    if (!logChannel) return;
+
+    let executor = "غير معروف";
     let executorTarget = message.author;
 
     try {
@@ -78,146 +82,233 @@ client.on('messageDelete', async (message) => {
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle(' لوق حذف رسالة جديد')
+        .setTitle('سجل حذف رسالة')
         .setColor('#ef4444')
         .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
         .addFields(
-            { name: ' المسؤول عن الحذف:', value: executor, inline: true },
-            { name: ' صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
-            { name: ' نص الرسالة المحذوفة:', value: `\`\`\`${message.content || 'محتوى ميديا أو إيموجي فقط'}\`\`\`` }
+            { name: 'المسؤول عن الحذف:', value: executor, inline: true },
+            { name: 'صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
+            { name: 'نص الرسالة المحذوفة:', value: `\`\`\`${message.content || 'محتوى ميديا أو إيموجي فقط'}\`\`\`` }
         )
         .setThumbnail(executorTarget.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
 
-    targetLogChannel.send({ embeds: [embed] }).catch(err => console.error("Error sending delete log:", err.message));
+    logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
 // [حدث تعديل الرسالة]
 client.on('messageUpdate', async (oldMessage, newMessage) => {
-    if (oldMessage.partial || oldMessage.author?.bot) return;
-    if (oldMessage.content === newMessage.content) return; // لضمان عدم تكرار اللوق عند إضافة منشن تلقائي أو ميديا
+    if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
+    if (oldMessage.content === newMessage.content) return;
 
-    const roomConfig = rooms.find(r => r.id === oldMessage.channel.id);
-    if (!roomConfig || !roomConfig.messagesEnabled) return;
+    const settings = guildSettings[oldMessage.guild.id];
+    if (!settings || !settings.monitoredRooms[oldMessage.channel.id]) return;
 
-    const targetLogChannel = client.channels.cache.get(messageLogChannelId);
-    if (!targetLogChannel) return;
+    const logChannel = oldMessage.guild.channels.cache.get(settings.messageLogChannelId);
+    if (!logChannel) return;
 
     const embed = new EmbedBuilder()
-        .setTitle('📝 لوق تعديل رسالة جديد')
+        .setTitle('سجل تعديل رسالة')
         .setColor('#ca8a04')
         .setDescription(`تم تعديل رسالة في الروم: <#${oldMessage.channel.id}>`)
         .addFields(
-            { name: '👤 صاحب الرسالة (المعدِّل):', value: `<@${oldMessage.author.id}>`, inline: false },
-            { name: '⬅️ المحتوى قبل التعديل:', value: `\`\`\`${oldMessage.content || 'فارغ'}\`\`\`` },
-            { name: '➡️ المحتوى بعد التعديل:', value: `\`\`\`${newMessage.content || 'فارغ'}\`\`\`` }
+            { name: 'صاحب الرسالة المعدل:', value: `<@${oldMessage.author.id}>`, inline: false },
+            { name: 'المحتوى قبل التعديل:', value: `\`\`\`${oldMessage.content || 'فارغ'}\`\`\`` },
+            { name: 'المحتوى بعد التعديل:', value: `\`\`\`${newMessage.content || 'فارغ'}\`\`\`` }
         )
         .setThumbnail(oldMessage.author.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
 
-    targetLogChannel.send({ embeds: [embed] }).catch(err => console.error("Error sending update log:", err.message));
+    logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// [حدث التايم أوت العام - أي شخص بأي مكان]
+// [حدث التايم أوت وفك التايم أوت العام]
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    if (!oldMember.guild) return;
+    const settings = guildSettings[oldMember.guild.id];
+    if (!settings) return;
+
+    const logChannel = oldMember.guild.channels.cache.get(settings.timeoutLogChannelId);
+    if (!logChannel) return;
+
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
+    // حالة 1: إعطاء تايم أوت جديد
     if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
-        const targetLogChannel = client.channels.cache.get(timeoutLogChannelId);
-        if (!targetLogChannel) return;
-
         let executor = 'مشرف مجهول';
-        let executorUser = null;
-        
         try {
             const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
             const auditEntry = fetchedLogs.entries.first();
-            if (auditEntry && auditEntry.target.id === newMember.id) {
-                executor = `<@${auditEntry.executor.id}>`;
-                executorUser = auditEntry.executor;
-            }
+            if (auditEntry && auditEntry.target.id === newMember.id) executor = `<@${auditEntry.executor.id}>`;
         } catch (e) {}
 
         const durationMinutes = Math.round((newTimeout - Date.now()) / 60000);
 
         const embed = new EmbedBuilder()
-            .setTitle(' لوق عقوبة تايم أوت (عام)')
+            .setTitle('سجل عقوبة تايم أوت')
             .setColor('#38bdf8')
-            .setDescription(` تطبيق عقوبة  زمنيّة على أحد الأعضاء`)
             .addFields(
-                { name: ' من قام بإعطاء التايم أوت:', value: executor, inline: true },
-                { name: ' العضو المعاقب (تايم اوت):', value: `<@${newMember.id}>`, inline: true },
-                { name: ' مدة العقوبة الزمنيّة:', value: `\`${durationMinutes} دقيقة\``, inline: false }
+                { name: 'من قام بإعطاء التايم أوت:', value: executor, inline: true },
+                { name: 'العضو المعاقب:', value: `<@${newMember.id}>`, inline: true },
+                { name: 'مدة العقوبة الزمنية:', value: `\`${durationMinutes} دقيقة\``, inline: false }
             )
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
 
-        if (executorUser) {
-            embed.setFooter({ text: `بواسطة: ${executorUser.tag}`, iconURL: executorUser.displayAvatarURL() });
-        }
+        logChannel.send({ embeds: [embed] }).catch(() => {});
+    } 
+    // حالة 2: فك التايم أوت (إما يدوي أو انتهاء المدة)
+    else if (oldTimeout && oldTimeout > Date.now() && (!newTimeout || newTimeout <= Date.now())) {
+        let executor = 'نظام ديسكورد التلقائي (انتهاء المدة)';
+        try {
+            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
+            const auditEntry = fetchedLogs.entries.first();
+            // التحقق من أن الإجراء هو فك التايم أوت يدوياً عبر المشرف
+            if (auditEntry && auditEntry.target.id === newMember.id) {
+                const change = auditEntry.changes.find(c => c.key === 'communication_disabled_until');
+                if (change && change.old && !change.new) {
+                    executor = `<@${auditEntry.executor.id}>`;
+                }
+            }
+        } catch (e) {}
 
-        targetLogChannel.send({ embeds: [embed] }).catch(err => console.error("Error sending timeout log:", err.message));
+        const embed = new EmbedBuilder()
+            .setTitle('سجل فك عقوبة التايم أوت')
+            .setColor('#22c55e')
+            .addFields(
+                { name: 'المسؤول عن فك العقوبة:', value: executor, inline: true },
+                { name: 'العضو الذي تم فك العقوبة عنه:', value: `<@${newMember.id}>`, inline: true }
+            )
+            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
+            .setTimestamp();
+
+        logChannel.send({ embeds: [embed] }).catch(() => {});
     }
 });
 
-// تشغيل البوت بالتوكن المتوافق مع ملفك
-if (process.env.DISCORD_TOKEN) {
-    client.login(process.env.DISCORD_TOKEN).catch(err => console.error("Discord Login Error: ", err.message));
-}
-
 // ==========================================
-// 3. مسارات التحكم للداش بورد الفخم (Express)
+// 3. سيرفر الويب والداش بورد الاحترافي
 // ==========================================
-app.get('/', (req, res) => res.redirect('/dashboard/logs'));
 
-app.get('/dashboard/logs', (req, res) => {
-    refreshRoomsList(); // لتحديث أي قنوات جديدة تمت إضافتها للسيرفرات
-    res.send(getModernHtmlTemplate(rooms, messageLogChannelId, timeoutLogChannelId));
+// مسار عرض قائمة السيرفرات المتصلة والغير متصلة
+app.get('/', (req, res) => res.redirect('/dashboard'));
+
+app.get('/dashboard', (req, res) => {
+    // محاكاة قائمة السيرفرات (بحكم عدم ربط OAuth كامل لتسهيل الكود، يظهر سيرفرات البوت الحالية لربط الإدارة المباشرة)
+    let botGuilds = client.guilds.cache.map(g => ({ id: g.id, name: g.name, hasBot: true, icon: g.iconURL() }));
+    
+    res.send(getGuildSelectorHtml(botGuilds));
 });
 
-app.post('/dashboard/update-settings', (req, res) => {
+// مسار التحكم بسيرفر معين
+app.get('/dashboard/manage/:guildId', (req, res) => {
+    const guildId = req.params.guildId;
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return res.send('السيرفر غير موجود أو لم يتم العثور على البوت فيه.');
+
+    initGuildSettings(guildId);
+    const settings = guildSettings[guildId];
+
+    const textChannels = guild.channels.cache.filter(c => c.type === 0).map(c => ({ id: c.id, name: c.name }));
+
+    res.send(getManageServerHtml(guild, textChannels, settings));
+});
+
+// استقبال تحديثات سيرفر محدد
+app.post('/dashboard/update/:guildId', (req, res) => {
+    const guildId = req.params.guildId;
     const { enabledMessageRooms, mainMessageChannel, mainTimeoutChannel } = req.body;
 
-    // حفظ الرومات المستهدفة لإرسال اللوق إليها
-    messageLogChannelId = mainMessageChannel || "";
-    timeoutLogChannelId = mainTimeoutChannel || "";
+    if (!guildSettings[guildId]) initGuildSettings(guildId);
 
-    // تحديث كبسات الصح للرومات المستهدفة للمراقبة (الحذف والتعديل)
+    guildSettings[guildId].messageLogChannelId = mainMessageChannel || "";
+    guildSettings[guildId].timeoutLogChannelId = mainTimeoutChannel || "";
+
     const msgRooms = Array.isArray(enabledMessageRooms) ? enabledMessageRooms : (enabledMessageRooms ? [enabledMessageRooms] : []);
-    rooms.forEach(room => {
-        room.messagesEnabled = msgRooms.includes(room.id);
-    });
+    
+    // تصفير وتحديث غرف المراقبة للسيرفر المذكور
+    for (let roomId in guildSettings[guildId].monitoredRooms) {
+        guildSettings[guildId].monitoredRooms[roomId] = msgRooms.includes(roomId);
+    }
 
-    res.redirect('/dashboard/logs');
+    res.redirect(`/dashboard/manage/${guildId}`);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Fabulous Dashboard live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${PORT}`));
 
 // ==========================================
-// 4. دالة توليد قالب الـ HTML بالتصميم المودرن والغامق
+// 4. قوالب واجهات الـ HTML للتصميم المودرن
 // ==========================================
-function getModernHtmlTemplate(roomsList, currentMsgTarget, currentTimeTarget) {
-    // بناء خيارات القوائم المنسدلة لاختيار رومات الإرسال
-    let channelOptions = roomsList.map(r => `
-        <option value="${r.id}" ${currentMsgTarget === r.id || currentTimeTarget === r.id ? 'style="color:#38bdf8;"' : ''}>
-            ${r.name}
-        </option>
+
+function getGuildSelectorHtml(botGuilds) {
+    // كود الرابط التلقائي لإضافة البوت لسيرفر جديد
+    const botInviteUrl = `https://discord.com{client.user ? client.user.id : ''}&permissions=8&scope=bot`;
+
+    let cardsHtml = botGuilds.map(g => `
+        <div class="server-card">
+            <img class="server-icon" src="${g.icon || 'https://discordapp.com'}" alt="">
+            <div class="server-details">
+                <h3>${g.name}</h3>
+                <span class="status-tag status-online">متصل وجاهز</span>
+            </div>
+            <a href="/dashboard/manage/${g.id}" class="ctrl-btn text-dark">تحكم بالسيرفر</a>
+        </div>
     `).join('');
 
-    // بناء جدول الرومات المراقبة
-    let roomsRows = roomsList.map(room => `
-        <tr>
-            <td>
-                <div class="room-info">
-                    <span class="room-icon">#</span>
-                    <strong>${room.name}</strong>
+    return `
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>لوحة التحكم | اختيار السيرفر</title>
+        <style>
+            :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; }
+            * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
+            body { background: var(--bg-p); color: var(--text); padding: 5px; }
+            .container { max-width: 1000px; margin: 60px auto; padding: 0 20px; }
+            header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid var(--bg-a); padding-bottom: 20px; }
+            h1 { font-size: 26px; font-weight: 800; }
+            .invite-btn { background: var(--blue); color: var(--bg-p); padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; }
+            .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+            .server-card { background: var(--bg-s); border: 1px solid var(--bg-a); border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 15px; }
+            .server-icon { width: 60px; height: 60px; border-radius: 50%; background: var(--bg-a); }
+            .server-details { flex-grow: 1; }
+            .server-details h3 { font-size: 16px; margin-bottom: 4px; }
+            .status-tag { font-size: 12px; font-weight: bold; color: #22c55e; }
+            .ctrl-btn { background: var(--bg-a); color: var(--text); padding: 8px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; transition: 0.2s; }
+            .ctrl-btn:hover { background: var(--blue); color: var(--bg-p); }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <div>
+                    <h1>لوحة الإدارة المركزية للبوت</h1>
+                    <p style="color: var(--text-m); font-size:14px; margin-top:5px;">اختر السيرفر المستهدف لتخصيص خيارات الفلاتر واستلام السجلات.</p>
                 </div>
-            </td>
+                <a href="${botInviteUrl}" target="_blank" class="invite-btn">إضافة البوت لسيرفر آخر</a>
+            </header>
+            <div class="server-grid">
+                ${cardsHtml || '<p style="color:var(--text-m);">لم يتم العثور على أي سيرفرات متصلة بالبوت حالياً.</p>'}
+            </div>
+        </div>
+    </body>
+    </html>`;
+}
+
+function getManageServerHtml(guild, textChannels, settings) {
+    let selectOptions = textChannels.map(c => `
+        <option value="${c.id}">#${c.name}</option>
+    `).join('');
+
+    let roomsRows = textChannels.map(c => `
+        <tr>
+            <td><strong>#${c.name}</strong></td>
             <td>
                 <label class="switch">
-                    <input type="checkbox" name="enabledMessageRooms" value="${room.id}" ${room.messagesEnabled ? 'checked' : ''}>
+                    <input type="checkbox" name="enabledMessageRooms" value="${c.id}" ${settings.monitoredRooms[c.id] ? 'checked' : ''}>
                     <span class="slider"></span>
                 </label>
             </td>
@@ -229,126 +320,77 @@ function getModernHtmlTemplate(roomsList, currentMsgTarget, currentTimeTarget) {
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>لوحة القيادة الذكية | ديسكورد</title>
+        <title>إدارة سيرفر | ${guild.name}</title>
         <style>
-            :root {
-                --bg-primary: #0f172a;
-                --bg-secondary: #1e293b;
-                --bg-accent: #334155;
-                --text-main: #f8fafc;
-                --text-muted: #94a3b8;
-                --color-blue: #38bdf8;
-                --color-green: #22c55e;
-            }
+            :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; --green: #22c55e; }
             * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { display: flex; background-color: var(--bg-primary); color: var(--text-main); min-height: 100vh; }
-            
-            /* القائمة الجانبية الأنيقة */
-            .sidebar { width: 280px; background-color: var(--bg-secondary); border-left: 1px solid var(--bg-accent); position: fixed; right: 0; top: 0; bottom: 0; padding: 30px 20px; }
-            .sidebar h2 { font-size: 24px; font-weight: 800; color: var(--color-blue); text-align: center; margin-bottom: 40px; letter-spacing: 0.5px; }
-            .sidebar ul { list-style: none; }
-            .sidebar ul li a { display: flex; align-items: center; padding: 14px 18px; color: var(--text-main); text-decoration: none; border-radius: 8px; background-color: var(--bg-accent); font-weight: 600; transition: 0.3s ease; }
-            .sidebar ul li a:hover { background-color: var(--color-blue); color: var(--bg-primary); }
-
-            /* منطقة المحتوى */
-            .main-content { margin-right: 280px; padding: 40px; width: calc(100% - 280px); }
-            header { margin-bottom: 35px; }
-            header h1 { font-size: 28px; font-weight: 800; margin-bottom: 5px; }
-            header p { color: var(--text-muted); font-size: 15px; }
-            
-            /* كروت الإعدادات المودرن */
-            .grid-selectors { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
-            .card { background: var(--bg-secondary); border: 1px solid var(--bg-accent); padding: 25px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); }
-            .card h3 { font-size: 18px; margin-bottom: 15px; color: var(--color-blue); border-bottom: 1px solid var(--bg-accent); padding-bottom: 10px; }
-            
-            label.block-label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 14px; font-weight: 600; }
-            select { width: 100%; padding: 12px; background: var(--bg-primary); border: 1px solid var(--bg-accent); color: var(--text-main); border-radius: 8px; outline: none; font-size: 15px; cursor: pointer; }
-            
-            /* الجداول المفخمة */
+            body { display: flex; background: var(--bg-p); color: var(--text); }
+            .sidebar { width: 260px; background: var(--bg-s); border-left: 1px solid var(--bg-a); position: fixed; right: 0; top: 0; bottom: 0; padding: 30px 20px; }
+            .sidebar h2 { font-size: 20px; color: var(--blue); margin-bottom: 30px; text-align: center; }
+            .sidebar a { display: block; padding: 12px; color: var(--text); text-decoration: none; background: var(--bg-a); border-radius: 8px; font-weight: bold; text-align: center; }
+            .main-content { margin-right: 260px; padding: 40px; width: calc(100% - 260px); }
+            .card { background: var(--bg-s); border: 1px solid var(--bg-a); padding: 25px; border-radius: 12px; margin-bottom: 30px; }
+            .card h3 { font-size: 18px; margin-bottom: 15px; color: var(--blue); border-bottom: 1px solid var(--bg-a); padding-bottom: 10px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+            select { width: 100%; padding: 12px; background: var(--bg-p); border: 1px solid var(--bg-a); color: var(--text); border-radius: 8px; outline: none; margin-top: 5px; cursor: pointer; }
             table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            th, td { padding: 14px 20px; text-align: right; }
-            th { background-color: var(--bg-primary); color: var(--text-muted); font-size: 14px; text-transform: uppercase; font-weight: 700; border-bottom: 2px solid var(--bg-accent); }
-            td { border-bottom: 1px solid var(--bg-accent); font-size: 15px; }
-            tr:hover td { background-color: rgba(255,255,255,0.02); }
-
-            .room-info { display: flex; align-items: center; gap: 10px; }
-            .room-icon { background: var(--bg-accent); color: var(--color-blue); padding: 4px 8px; border-radius: 6px; font-family: monospace; }
-
-            /* زر الحفظ الكبير */
-            .btn-save { background-color: var(--color-green); color: white; border: none; padding: 14px 35px; font-weight: bold; border-radius: 8px; cursor: pointer; font-size: 16px; margin-top: 20px; width: 100%; transition: 0.2s; box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2); }
-            .btn-save:hover { transform: translateY(-2px); filter: brightness(1.1); }
-
-            /* سويتشات الـ Toggle الجميلة بدلاً من التشيك بوكس التقليدي */
+            th, td { padding: 12px 20px; text-align: right; border-bottom: 1px solid var(--bg-a); }
+            th { background: var(--bg-p); color: var(--text-m); font-size: 13px; }
+            .btn-save { background: var(--green); color: #fff; border: none; padding: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; font-size: 16px; width: 100%; }
             .switch { position: relative; display: inline-block; width: 45px; height: 24px; }
             .switch input { opacity: 0; width: 0; height: 0; }
-            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--bg-accent); transition: .4s; border-radius: 24px; }
-            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-            input:checked + .slider { background-color: var(--color-blue); }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-a); transition: .4s; border-radius: 24px; }
+            .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background: white; transition: .4s; border-radius: 50%; }
+            input:checked + .slider { background: var(--blue); }
             input:checked + .slider:before { transform: translateX(-21px); }
+            .current-status { font-size: 13px; color: var(--text-m); margin-top: 5px; display: block; }
         </style>
     </head>
     <body>
-
-        <!-- القائمة الجانبية اليمنى الثابتة -->
         <div class="sidebar">
-            <h2>لوحة التحكم</h2>
-            <ul>
-                <li><a href="/dashboard/logs">🌐 غرف التوجيه واللوق</a></li>
-            </ul>
+            <h2>إدارة النظام</h2>
+            <a href="/dashboard">الرجوع للسيرفرات</a>
         </div>
-
-        <!-- المحتوى الرئيسي المتجاوب -->
         <div class="main-content">
-            <header>
-                <h1>توجيه وإدارة السجلات الذكية</h1>
-                <p>قم بتحديد قنوات ديسكورد المستهدفة لتلقي الإمبيدات (Embeds) والتحكم بفلاتر المراقبة الحية.</p>
-            </header>
-
-            <form action="/dashboard/update-settings" method="POST">
-                
-                <!-- كروت التحديد العلوي لقنوات الإرسال المباشر -->
-                <div class="grid-selectors">
+            <h1 style="margin-bottom: 25px;">تحكم سيرفر: ${guild.name}</h1>
+            <form action="/dashboard/update/${guild.id}" method="POST">
+                <div class="grid">
                     <div class="card">
-                        <h3>📥 لوق الرسائل (حذف + تعديل)</h3>
-                        <label class="block-label">اختر الروم التي سيرسل إليها البوت الإمبيدات:</label>
+                        <h3>قناة لوق الرسائل</h3>
+                        <p style="font-size: 13px; color: var(--text-m);">توجيه إمبيدات الحذف والتعديل المراقبة:</p>
                         <select name="mainMessageChannel">
-                            <option value="">-- لم يتم التحديد (تعطيل الإرسال) --</option>
-                            ${channelOptions}
+                            <option value="">-- تعطيل إرسال لوق الرسائل --</option>
+                            ${selectOptions}
                         </select>
+                        <span class="current-status">المحدد حالياً: <b>${settings.messageLogChannelId ? '#' + (guild.channels.cache.get(settings.messageLogChannelId)?.name || 'غير معروف') : 'لا يوجد'}</b></span>
                     </div>
-
                     <div class="card">
-                        <h3>⏱️ لوق التايم أوت (العام لكافة الأعضاء)</h3>
-                        <label class="block-label">اختر الروم التي سيرسل إليها البوت لوق التايم أوت فورا:</label>
+                        <h3>قناة لوق التايم أوت العامه</h3>
+                        <p style="font-size: 13px; color: var(--text-m);">توجيه إمبيد إعطاء وفك التايم أوت لكافة الأعضاء:</p>
                         <select name="mainTimeoutChannel">
-                            <option value="">-- لم يتم التحديد (تعطيل الإرسال) --</option>
-                            ${channelOptions}
+                            <option value="">-- تعطيل إرسال لوق التايم أوت --</option>
+                            ${selectOptions}
                         </select>
+                        <span class="current-status">المحدد حالياً: <b>${settings.timeoutLogChannelId ? '#' + (guild.channels.cache.get(settings.timeoutLogChannelId)?.name || 'غير معروف') : 'لا يوجد'}</b></span>
                     </div>
                 </div>
-
-                <!-- جدول اختيار قنوات المراقبة للحذف والتعديل -->
                 <div class="card">
-                    <h3>🎯 فلاتر مراقبة قنوات الشات (حذف وتعديل)</h3>
-                    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 10px;">شغل المفتاح أمام الروم لتفعيل صيد الحذف والتعديل منها، الرومات المعطلة سيتم تجاهلها بالكامل.</p>
+                    <h3>فلاتر مراقبة الشات (حذف وتعديل)</h3>
                     <table>
                         <thead>
                             <tr>
-                                <th>اسم السيرفر والروم النصية</th>
-                                <th style="width: 150px;">حالة المراقبة</th>
+                                <th>اسم الروم النصية</th>
+                                <th style="width: 120px;">حالة المراقبة</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${roomsRows || '<tr><td colspan="2" style="text-align:center; color:var(--text-muted);">جاري جلب القنوات، تأكد من تشغيل البوت...</td></tr>'}
+                            ${roomsRows}
                         </tbody>
                     </table>
                 </div>
-
-                <button type="submit" class="btn-save">حفظ الإعدادات وتطبيق التوجيه الفوري 💾</button>
+                <button type="submit" class="btn-save">حفظ إعدادات السيرفر الفورية 💾</button>
             </form>
         </div>
-
     </body>
     </html>`;
 }
