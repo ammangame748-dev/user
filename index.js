@@ -62,7 +62,6 @@ client.on('messageUpdate', (oldMessage, newMessage) => {
         timestamp: new Date().toLocaleString('ar-EG', { timeZone: 'Asia/Amman' })
     });
 
-    // تقليص حجم المصفوفة لعدم استهلاك الذاكرة (آخر 100 سجل)
     if (messageLogs.length > 100) messageLogs.pop();
 });
 
@@ -76,7 +75,6 @@ client.on('messageDelete', async (message) => {
 
     let executor = message.author ? message.author.tag : 'غير معروف';
 
-    // محاولة جلب الشخص الذي قام بالحذف من سجلات التدقيق (Audit Logs)
     try {
         const fetchedLogs = await message.guild.fetchAuditLogs({
             limit: 1,
@@ -86,9 +84,7 @@ client.on('messageDelete', async (message) => {
         if (deletionLog && deletionLog.target.id === message.author.id && (Date.now() - deletionLog.createdTimestamp) < 5000) {
             executor = deletionLog.executor.tag;
         }
-    } catch (e) {
-        // في حال عدم توفر صلاحيات للمشاهدة
-    }
+    } catch (e) {}
 
     messageLogs.unshift({
         type: 'حذف',
@@ -103,15 +99,12 @@ client.on('messageDelete', async (message) => {
 
 // [حدث التايم أوت للمستخدمين]
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    // التحقق من تفعيل التايم أوت (العقوبة الزمنيّة)
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
-    // إذا تم إضافة تايم أوت جديد ولم يكن موجوداً من قبل
     if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
         let executor = 'مشرف مجهول';
         
-        // جلب من قام بإعطاء التايم أوت
         try {
             const fetchedLogs = await newMember.guild.fetchAuditLogs({
                 limit: 1,
@@ -125,12 +118,9 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
         const durationMinutes = Math.round((newTimeout - Date.now()) / 60000);
 
-        // نسجل التايم أوت تحت رومات السيرفر
-        // نقوم بالبحث عن أي روم نصية في هذا السيرفر مفعل فيها التايم أوت لنربط الإجراء بها
         const guildChannels = newMember.guild.channels.cache.filter(c => c.type === 0).map(c => c.id);
         const activeTimeoutChannel = rooms.find(r => guildChannels.includes(r.id) && r.timeoutsEnabled);
 
-        // إذا كانت رومات السيرفر لا يوجد عليها صح للتايم أوت، نرفض تسجيل اللوق
         if (!activeTimeoutChannel) return;
 
         timeoutLogs.unshift({
@@ -145,21 +135,20 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-// تشغيل البوت باستخدام التوكن المخزن بـ .env
-if (process.env.TOKEN) {
-    client.login(process.env.TOKEN).catch(err => console.error("Discord Bot Login Error: ", err.message));
+// تعديل قراءة التوكن ليتطابق مع DISCORD_TOKEN في صورتك
+const botToken = process.env.DISCORD_TOKEN; 
+if (botToken) {
+    client.login(botToken).catch(err => console.error("Discord Bot Login Error: ", err.message));
 } else {
-    console.error("خطأ: لم يتم العثور على متغير البيئة TOKEN في ملف .env الخاص بك!");
+    console.error("خطأ: لم يتم العثور على متغير البيئة DISCORD_TOKEN!");
 }
 
 // ==========================================
 // 3. مسارات الداش بورد (Express Routes)
 // ==========================================
-
 app.get('/', (req, res) => res.redirect('/dashboard/logs'));
 
 app.get('/dashboard/logs', (req, res) => {
-    // تصفية المصفوفات بحسب التشيك بوكس (الصح) المفعل حالياً
     const activeMessageRoomIds = rooms.filter(r => r.messagesEnabled).map(r => r.id);
     const activeTimeoutRoomIds = rooms.filter(r => r.timeoutsEnabled).map(r => r.id);
 
@@ -183,14 +172,14 @@ app.post('/dashboard/update-rooms', (req, res) => {
     res.redirect('/dashboard/logs');
 });
 
-// تشغيل السيرفر على بورت راندر
+// قراءة البورت الديناميكي من راندر أو الثابت (10000) من ملفك
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Web Dashboard online on port ${PORT}`);
 });
 
 // ==========================================
-// 4. دالة توليد الواجهة البرمجية HTML الهجينة
+// 4. دالة توليد الواجهة البرمجية HTML
 // ==========================================
 function getHtmlTemplate(roomsList, msgLogs, timeLogs) {
     let roomsRows = roomsList.map(room => `
@@ -279,7 +268,7 @@ function getHtmlTemplate(roomsList, msgLogs, timeLogs) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${roomsRows || '<tr><td colspan="3" style="text-align:center;">جاري جلب قنوات البوت... تأكد من وجود البوت بسيرفر ما وتعيين الـ TOKEN بشكل صحيح.</td></tr>'}
+                            ${roomsRows || '<tr><td colspan="3" style="text-align:center;">جاري جلب قنوات البوت... تأكد من وجود البوت بسيرفر ما.</td></tr>'}
                         </tbody>
                     </table>
                     <button type="submit" class="btn">حفظ وتحديث الفلاتر</button>
