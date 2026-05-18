@@ -108,6 +108,12 @@ client.on('messageDelete', async (message) => {
         }
     } catch (e) { }
 
+    // فحص الميديا المحذوفة (صورة أو فيديو) لضمان عدم ضياع الرابط
+    const hasAttachment = message.attachments.size > 0;
+    const firstAttachment = hasAttachment ? message.attachments.first() : null;
+    const isImage = firstAttachment && firstAttachment.contentType?.startsWith('image/');
+    const attachmentUrl = firstAttachment ? (firstAttachment.proxyURL || firstAttachment.url) : null;
+
     const embed = new EmbedBuilder()
         .setTitle('سجل حذف رسالة')
         .setColor('#ef4444')
@@ -115,13 +121,26 @@ client.on('messageDelete', async (message) => {
         .addFields(
             { name: 'المسؤول عن الحذف:', value: executor || 'غير معروف (أو صاحب الرسالة)', inline: true },
             { name: 'صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
-            { name: 'نص الرسالة المحذوفة:', value: `\`\`\`${(message.content && message.content.trim()) ? message.content : 'محتوى ميديا أو إيموجي فقط'}\`\`\`` }
+            { 
+                name: 'نص الرسالة المحذوفة:', 
+                value: `\`\`\`${(message.content && message.content.trim()) ? message.content : (hasAttachment ? 'مرفق ميديا (صورة/فيديو)' : 'محتوى ميديا أو إيموجي فقط')}\`\`\`` 
+            }
         )
         .setThumbnail(executorTarget ? executorTarget.displayAvatarURL({ dynamic: true }) : message.guild.iconURL({ dynamic: true }))
         .setTimestamp();
 
+    // إذا كانت الميديا المحذوفة صورة، ستظهر مباشرة داخل الإيمبد
+    if (isImage && attachmentUrl) {
+        embed.setImage(attachmentUrl);
+    } 
+    // إذا كان فيديو، سنضع رابط التحميل في الأسفل لكي لا يختفي
+    else if (hasAttachment && attachmentUrl) {
+        embed.addFields({ name: 'رابط الفيديو المحذوف:', value: `[اضغط هنا لمشاهدة أو تحميل الفيديو](${attachmentUrl})` });
+    }
+
     logChannel.send({ embeds: [embed] }).catch((err) => console.error("فشل إرسال سجل الحذف:", err));
 });
+
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
