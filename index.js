@@ -1,554 +1,235 @@
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder, AuditLogEvent, Partials } = require('discord.js');
-const session = require('express-session');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
-
-
+const ejs = require('ejs');
 const app = express();
+
+// قراءة متغيرات البيئة من راندر (تلقائياً) أو من ملف .env محلياً إذا كان مثبت
+require('dotenv').config({ silent: true }); 
+
+// إعدادات قراءة البيانات القادمة من الواجهة
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
-app.use(session({
-    secret: 'secret-key-dashboard',
-    resave: false,
-    saveUninitialized: false
-}));
+// 1. البيانات الوهمية للرومات (تتحكم بها من الداش بورد)
+let rooms = [
+    { id: "room_1", name: "العامة (General)", messagesEnabled: true, timeoutsEnabled: true },
+    { id: "room_2", name: "الألعاب (Gaming)", messagesEnabled: false, timeoutsEnabled: true },
+    { id: "room_3", name: "البرمجة (Coding)", messagesEnabled: true, timeoutsEnabled: false },
+    { id: "room_4", name: "الدعم الفني (Support)", messagesEnabled: false, timeoutsEnabled: false }
+];
 
-const CONFIG_FILE = path.join(__dirname, 'progress.json');
+// 2. سجلات الحذف والتعديل
+let messageLogs = [
+    { type: 'حذف', room: 'room_1', actor: 'أحمد', content: 'رسالة مخالفة للشروط', timestamp: '2026-05-18 10:00' },
+    { type: 'تعديل', room: 'room_3', actor: 'خالد', content: 'تم تغيير النص من (مرحبا) إلى (أهلاً بالجميع)', timestamp: '2026-05-18 10:15' },
+    { type: 'حذف', room: 'room_2', actor: 'سعيد', content: 'رابط خارجي غير مسموح', timestamp: '2026-05-18 10:30' }
+];
 
-const CLIENT_ID = process.env.CLIENT_ID || "1501846584961532004";
-const CLIENT_SECRET = process.env.CLIENT_SECRET || "lKyk-Mjv8FYAQMCXhPw0kd2A0-RoqX2W";
-const REDIRECT_URI = process.env.REDIRECT_URI || "https://user-q5p3.onrender.com/auth/callback";
+// 3. سجلات التايم أوت
+let timeoutLogs = [
+    { room: 'room_1', actor: 'عمر (مشرف)', target: 'يوسف', duration: '10 دقائق', timestamp: '2026-05-18 10:05' },
+    { room: 'room_2', actor: 'زياد (إدارة)', target: 'محمد', duration: '1 ساعة', timestamp: '2026-05-18 10:45' }
+];
 
-function loadConfig() {
-    if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}));
-    try {
-        return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    } catch (e) {
-        return {};
-    }
-}
-
-function saveConfig(data) {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 4));
-}
-
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildMembers
-    ],
-    partials: [Partials.Message, Partials.Channel]
-});
-
-app.get('/login', (req, res) => {
-    const authorizeUrl =
-        `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-        `&response_type=code` +
-        `&scope=identify%20guilds`;
-
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Redirecting...</title>
-        </head>
-        <body>
-            <script>
-                window.location.href = "${authorizeUrl}";
-            </script>
-        </body>
-        </html>
-    `);
-});
-
+// التوجيه التلقائي لصفحة اللوق
 app.get('/', (req, res) => {
-    res.redirect('/login');
+    res.redirect('/dashboard/logs');
 });
 
-app.get('/auth/callback', async (req, res) => {
+// مسار صفحة اللوق والداش بورد الرئيسي
+app.get('/dashboard/logs', (req, res) => {
+    // تصفية السجلات بناءً على الرومات المفعلة (التي بجانبها صح)
+    const activeMessageRoomIds = rooms.filter(r => r.messagesEnabled).map(r => r.id);
+    const activeTimeoutRoomIds = rooms.filter(r => r.timeoutsEnabled).map(r => r.id);
 
-    const code = req.query.code;
+    const filteredMessageLogs = messageLogs.filter(log => activeMessageRoomIds.includes(log.room));
+    const filteredTimeoutLogs = timeoutLogs.filter(log => activeTimeoutRoomIds.includes(log.room));
 
-    if (!code) {
-        return res.send("لم يتم إتمام تسجيل الدخول.");
-    }
-
-    try {
-        const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
-            method: 'POST',
-            body: new URLSearchParams({
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET,
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: REDIRECT_URI,
-            }),
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-        });
-
-        const tokenData = await tokenResponse.json();
-
-        if (!tokenData.access_token) {
-            console.log(tokenData);
-            return res.send("فشل الحصول على رمز الدخول من ديسكورد.");
-        }
-
-        const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
-            headers: {
-                Authorization: `Bearer ${tokenData.access_token}`
-            }
-        });
-
-        const guilds = await guildsResponse.json();
-
-        req.session.userGuilds = guilds;
-
-        res.redirect('/dashboard/servers');
-
-    } catch (error) {
-        console.error(error);
-        res.send("حدث خطأ أثناء الاتصال بديسكورد.");
-    }
+    // رندر لواجهة HTML المخزنة بالأسفل كـ String
+    res.send(ejs.render(htmlTemplate, {
+        rooms: rooms,
+        messageLogs: filteredMessageLogs,
+        timeoutLogs: filteredTimeoutLogs
+    }));
 });
 
-app.get('/dashboard/servers', (req, res) => {
-    if (!req.session.userGuilds) return res.redirect('/login');
+// استقبال تحديثات التشيك بوكس (الـ صح) من الواجهة
+app.post('/dashboard/update-rooms', (req, res) => {
+    const { enabledMessageRooms, enabledTimeoutRooms } = req.body;
 
-    let serverCards = '';
+    const msgRooms = Array.isArray(enabledMessageRooms) ? enabledMessageRooms : (enabledMessageRooms ? [enabledMessageRooms] : []);
+    const timeRooms = Array.isArray(enabledTimeoutRooms) ? enabledTimeoutRooms : (enabledTimeoutRooms ? [enabledTimeoutRooms] : []);
 
-    req.session.userGuilds.forEach(guild => {
-
-        const isAdmin =
-            (BigInt(guild.permissions) & BigInt(0x8)) === BigInt(0x8);
-
-        if (!isAdmin) return;
-
-        const isBotInGuild = client.guilds.cache.has(guild.id);
-
-        if (isBotInGuild) {
-
-            serverCards += `
-                <div style="background: #36393f; padding: 20px; margin: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
-                    <span>🟢 <b>${guild.name}</b></span>
-                    <a href="/dashboard/manage/${guild.id}" style="background: #5865f2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                        تحكم بالسيرفر
-                    </a>
-                </div>
-            `;
-
-        } else {
-
-            const inviteUrl =
-                `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}` +
-                `&permissions=8` +
-                `&scope=bot%20applications.commands` +
-                `&guild_id=${guild.id}` +
-                `&disable_guild_select=true`;
-
-            serverCards += `
-                <div style="background: #2f3136; padding: 20px; margin: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px dashed #4f545c;">
-                    <span style="color: #b9bbbe;">🔴 ${guild.name}</span>
-                    <a href="${inviteUrl}" target="_blank" style="background: #43b581; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                        إضافة البوت
-                    </a>
-                </div>
-            `;
-        }
+    // تحديث الحالة في الذاكرة فوراً
+    rooms.forEach(room => {
+        room.messagesEnabled = msgRooms.includes(room.id);
+        room.timeoutsEnabled = timeRooms.includes(room.id);
     });
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ar" dir="rtl">
-        <head>
-            <meta charset="UTF-8">
-            <title>سيرفراتك</title>
-        </head>
-        <body style="font-family: sans-serif; background: #2f3136; color: white; padding: 40px;">
-            <div style="max-width: 800px; margin: 0 auto;">
-                <h2>إختر السيرفر المراد إدارته:</h2>
-                <div style="margin-top: 20px;">
-                    ${serverCards || 'لا توجد سيرفرات تمتلك فيها صلاحية إدارة.'}
-                </div>
-            </div>
-        </body>
-        </html>
-    `);
+    res.redirect('/dashboard/logs');
 });
 
-app.get('/dashboard/manage/:guildId', (req, res) => {
+// تعديل هام لـ Render: قراءة البورت الديناميكي الذي تحدده الاستضافة تلقائياً
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Dashboard running smoothly on port ${PORT}`);
+});
 
-    if (!req.session.userGuilds)
-        return res.redirect('/login');
-
-    const guildId = req.params.guildId;
-
-    const userGuild =
-        req.session.userGuilds.find(g => g.id === guildId);
-
-    if (
-        !userGuild ||
-        (BigInt(userGuild.permissions) & BigInt(0x8)) !== BigInt(0x8)
-    ) {
-        return res.send("غير مصرح لك.");
-    }
-
-    const guild = client.guilds.cache.get(guildId);
-
-    if (!guild)
-        return res.send("البوت غادر السيرفر.");
-
-    const db = loadConfig();
-
-    if (!db[guildId]) {
-        db[guildId] = {
-            logChannelId: "",
-            ignoredChannels: [],
-            timeoutChannelId: ""
-        };
-    }
-
-    const config = db[guildId];
-
-    if (!config.ignoredChannels)
-        config.ignoredChannels = [];
-
-    const allChannels =
-        guild.channels.cache.filter(ch => ch.type === 0);
-
-    let channelOptionsLogs = '';
-    let channelOptionsTimeout = '';
-    let channelCheckboxes = '';
-
-    allChannels.forEach(ch => {
-
-        channelOptionsLogs += `
-            <option value="${ch.id}"
-            ${config.logChannelId === ch.id ? 'selected' : ''}>
-            #${ch.name}
-            </option>
-        `;
-
-        channelOptionsTimeout += `
-            <option value="${ch.id}"
-            ${config.timeoutChannelId === ch.id ? 'selected' : ''}>
-            #${ch.name}
-            </option>
-        `;
-
-        channelCheckboxes += `
-            <div style="display:flex;align-items:center;margin:10px 0;background:#36393f;padding:10px;border-radius:5px;">
-                <input
-                    type="checkbox"
-                    name="monitoredChannels"
-                    value="${ch.id}"
-                    ${!config.ignoredChannels.includes(ch.id) ? 'checked' : ''}
-                    style="margin-left:10px;transform:scale(1.3);"
-                >
-                <label>#${ch.name}</label>
-            </div>
-        `;
-    });
-
-    res.send(`
+// =========================================================================
+// واجهة الـ HTML والـ CSS (قالب EJS مدمج بملف واحد)
+// =========================================================================
+const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
-
 <head>
-<meta charset="UTF-8">
-<title>لوحة التحكم - ${guild.name}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة التحكم - السجلات</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+        body { display: flex; background-color: #f4f6f9; color: #333; }
+        
+        /* المنيو على اليمين */
+        .sidebar { width: 260px; height: 100vh; background-color: #1e293b; color: #fff; position: fixed; right: 0; top: 0; padding: 20px; }
+        .sidebar h2 { text-align: center; margin-bottom: 30px; font-size: 22px; color: #38bdf8; }
+        .sidebar ul { list-style: none; }
+        .sidebar ul li a { display: block; padding: 12px 15px; color: #cbd5e1; text-decoration: none; border-radius: 6px; background-color: #334155; font-weight: bold; }
+        .sidebar ul li a.active { background-color: #38bdf8; color: #1e293b; }
 
-<style>
-
-body{
-font-family:sans-serif;
-background:#2f3136;
-color:white;
-margin:0;
-padding:0;
-display:flex;
-height:100vh;
-}
-
-.sidebar{
-width:250px;
-background:#202225;
-padding:20px;
-display:flex;
-flex-direction:column;
-box-sizing:border-box;
-}
-
-.sidebar h3{
-margin-bottom:20px;
-text-align:center;
-color:#5865f2;
-}
-
-.sidebar a{
-color:#b9bbbe;
-text-decoration:none;
-padding:12px;
-margin-bottom:10px;
-border-radius:5px;
-font-weight:bold;
-cursor:pointer;
-}
-
-.sidebar a:hover,
-.sidebar a.active{
-background:#36393f;
-color:white;
-}
-
-.sidebar .back-btn{
-background:#e74c3c;
-color:white;
-text-align:center;
-margin-top:auto;
-}
-
-.main-content{
-flex:1;
-padding:40px;
-overflow-y:auto;
-background:#36393f;
-box-sizing:border-box;
-}
-
-.tab-content{
-display:none;
-max-width:600px;
-background:#202225;
-padding:30px;
-border-radius:8px;
-box-sizing:border-box;
-}
-
-.tab-content.active{
-display:block;
-}
-
-select,
-input,
-button{
-padding:10px;
-border-radius:5px;
-border:none;
-width:100%;
-box-sizing:border-box;
-margin-top:5px;
-margin-bottom:15px;
-}
-
-select,
-input{
-background:#40444b;
-color:white;
-}
-
-button{
-background:#5865f2;
-color:white;
-font-weight:bold;
-cursor:pointer;
-margin-top:10px;
-}
-
-label{
-font-weight:bold;
-display:block;
-margin-top:10px;
-}
-
-</style>
+        /* المحتوى الرئيسي */
+        .main-content { margin-right: 260px; padding: 40px; width: calc(100% - 260px); }
+        h1 { margin-bottom: 25px; color: #0f172a; }
+        
+        /* الكروت والجداول */
+        .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 30px; }
+        .card h3 { margin-bottom: 15px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #fff; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 15px; text-align: right; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #64748b; font-weight: 600; }
+        tr:hover { background-color: #f1f5f9; }
+        
+        /* عناصر التصميم */
+        .btn { background-color: #38bdf8; color: #1e293b; border: none; padding: 10px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 15px; }
+        .btn:hover { background-color: #0ea5e9; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-delete { background-color: #fee2e2; color: #ef4444; }
+        .badge-edit { background-color: #fef9c3; color: #ca8a04; }
+        input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+    </style>
 </head>
-
 <body>
 
-<div class="sidebar">
+    <!-- المنيو على اليمين وفيه صفحة اللوق -->
+    <div class="sidebar">
+        <h2>لوحة التحكم</h2>
+        <ul>
+            <li><a href="/dashboard/logs" class="active">صفحة اللوق (Logs)</a></li>
+        </ul>
+    </div>
 
-<h3>${guild.name}</h3>
+    <!-- المحتوى واللوقات -->
+    <div class="main-content">
+        <h1>سجلات النظام والتحكم بالرومات</h1>
 
-<a onclick="switchTab('log-settings')" id="btn-log-settings" class="active">
-📝 إعدادات اللوق
-</a>
+        <!-- جدول تحديد وتفعيل الرومات (الصح) -->
+        <div class="card">
+            <h3>تحديد الرومات المفعلة لجلب اللوق</h3>
+            <form action="/dashboard/update-rooms" method="POST">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>اسم الروم</th>
+                            <th>لوق الحذف والتعديل (صح للمراقبة)</th>
+                            <th>لوق التايم أوت (صح للمراقبة)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <%% rooms.forEach(room => { %>
+                            <tr>
+                                <td><strong><%%= room.name %></strong></td>
+                                <td>
+                                    <input type="checkbox" name="enabledMessageRooms" value="<%%= room.id %>" <%%= room.messagesEnabled ? 'checked' : '' %>>
+                                </td>
+                                <td>
+                                    <input type="checkbox" name="enabledTimeoutRooms" value="<%%= room.id %>" <%%= room.timeoutsEnabled ? 'checked' : '' %>>
+                                </td>
+                            </tr>
+                        <%% }) %>
+                    </tbody>
+                </table>
+                <button type="submit" class="btn">حفظ الإعدادات وتحديث الجداول</button>
+            </form>
+        </div>
 
-<a onclick="switchTab('timeout-settings')" id="btn-timeout-settings">
-⏳ إعدادات التايم آوت
-</a>
+        <!-- لوق الحذف والتعديل -->
+        <div class="card">
+            <h3>لوق حذف وتعديل الرسائل</h3>
+            <%% if(messageLogs.length === 0) { %>
+                <p style="color: #64748b; margin-top: 10px;">لا توجد سجلات لعرضها (تأكد من وضع صح على الروم المطلوبة).</p>
+            <%% } else { %>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>النوع</th>
+                            <th>الروم</th>
+                            <th>مين حذف/عدل</th>
+                            <th>المحتوى القديم / الإجراء</th>
+                            <th>الوقت</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <%% messageLogs.forEach(log => { %>
+                            <%% let currentRoom = rooms.find(r => r.id === log.room); %>
+                            <tr>
+                                <td>
+                                    <span class="badge <%%= log.type === 'حذف' ? 'badge-delete' : 'badge-edit' %>">
+                                        <%%= log.type %>
+                                    </span>
+                                </td>
+                                <td><%%= currentRoom ? currentRoom.name : log.room %></td>
+                                <td><strong><%%= log.actor %></strong></td>
+                                <td><%%= log.content %></td>
+                                <td><%%= log.timestamp %></td>
+                            </tr>
+                        <%% }) %>
+                    </tbody>
+                </table>
+            <%% } %>
+        </div>
 
-<a href="/dashboard/servers" class="back-btn">
-⬅️ السيرفرات
-</a>
+        <!-- لوق التايم أوت -->
+        <div class="card">
+            <h3>لوق التايم أوت (Timeouts)</h3>
+            <%% if(timeoutLogs.length === 0) { %>
+                <p style="color: #64748b; margin-top: 10px;">لا توجد سجلات لعرضها (تأكد من وضع صح على الروم المطلوبة).</p>
+            <%% } else { %>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الروم</th>
+                            <th>مين أعطى التايم</th>
+                            <th>لمين (المستهدف)</th>
+                            <th>الوقت المحدد (المدة)</th>
+                            <th>وقت الإجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <%% timeoutLogs.forEach(log => { %>
+                            <%% let currentRoom = rooms.find(r => r.id === log.room); %>
+                            <tr>
+                                <td><%%= currentRoom ? currentRoom.name : log.room %></td>
+                                <td><strong><%%= log.actor %></strong></td>
+                                <td><span style="color: #ef4444; font-weight: bold;"><%%= log.target %></span></td>
+                                <td><%%= log.duration %></td>
+                                <td><%%= log.timestamp %></td>
+                            </tr>
+                        <%% }) %>
+                    </tbody>
+                </table>
+            <%% } %>
+        </div>
 
-</div>
-
-<div class="main-content">
-
-<div id="log-settings" class="tab-content active">
-
-<h2>📝 إعدادات اللوق الرئيسية</h2>
-
-<form action="/dashboard/save/${guildId}" method="POST">
-
-<input type="hidden" name="formType" value="logs">
-
-<label>روم إرسال اللوق الرئيسية:</label>
-
-<select name="logChannelId">
-<option value="">-- اختر روم --</option>
-${channelOptionsLogs}
-</select>
-
-<h3>الرومات المراد مراقبتها:</h3>
-
-${channelCheckboxes}
-
-<button type="submit">
-حفظ التغييرات
-</button>
-
-</form>
-
-</div>
-
-<div id="timeout-settings" class="tab-content">
-
-<h2>⏳ إعدادات لوق التايم آوت</h2>
-
-<form action="/dashboard/save/${guildId}" method="POST">
-
-<input type="hidden" name="formType" value="timeout">
-
-<label>روم سجل التايم آوت المخصص:</label>
-
-<select name="timeoutChannelId">
-<option value="">-- اختر روم --</option>
-${channelOptionsTimeout}
-</select>
-
-<button type="submit">
-حفظ التغييرات
-</button>
-
-</form>
-
-</div>
-
-</div>
-
-<script>
-
-function switchTab(tabId){
-
-document.querySelectorAll('.tab-content')
-.forEach(tab => tab.classList.remove('active'));
-
-document.querySelectorAll('.sidebar a')
-.forEach(btn => btn.classList.remove('active'));
-
-document.getElementById(tabId)
-.classList.add('active');
-
-document.getElementById('btn-' + tabId)
-.classList.add('active');
-
-}
-
-</script>
+    </div>
 
 </body>
 </html>
-    `);
-});
-
-app.post('/dashboard/save/:guildId', (req, res) => {
-
-    if (!req.session.userGuilds)
-        return res.redirect('/login');
-
-    const guildId = req.params.guildId;
-
-    const guild = client.guilds.cache.get(guildId);
-
-    if (!guild)
-        return res.send("السيرفر غير موجود");
-
-    const userGuild =
-        req.session.userGuilds.find(g => g.id === guildId);
-
-    if (
-        !userGuild ||
-        (BigInt(userGuild.permissions) & BigInt(0x8)) !== BigInt(0x8)
-    ) {
-        return res.status(403).send("غير مصرح لك.");
-    }
-
-    const db = loadConfig();
-
-    if (!db[guildId]) {
-        db[guildId] = {
-            logChannelId: "",
-            ignoredChannels: [],
-            timeoutChannelId: ""
-        };
-    }
-
-    const { formType } = req.body;
-
-    if (formType === 'logs') {
-
-        const { logChannelId, monitoredChannels } = req.body;
-
-        const allTextChannels =
-            guild.channels.cache
-            .filter(ch => ch.type === 0)
-            .map(ch => ch.id);
-
-        const submittedChannels =
-            Array.isArray(monitoredChannels)
-            ? monitoredChannels
-            : (monitoredChannels ? [monitoredChannels] : []);
-
-        db[guildId].logChannelId = logChannelId || "";
-
-        db[guildId].ignoredChannels =
-            allTextChannels.filter(id =>
-                !submittedChannels.includes(id)
-            );
-
-    } else if (formType === 'timeout') {
-
-        db[guildId].timeoutChannelId =
-            req.body.timeoutChannelId || "";
-    }
-
-    saveConfig(db);
-
-    res.send(`
-<script>
-alert('تم الحفظ بنجاح!');
-window.location='/dashboard/manage/${guildId}';
-</script>
-    `);
-});
-
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}`);
-});
-
-client.login(process.env.DISCORD_TOKEN);
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Dashboard listening on port ${PORT}`);
-});
+`.replace(/<%%/g, '<%');
