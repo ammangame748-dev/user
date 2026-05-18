@@ -10,8 +10,8 @@ app.use(express.json());
 const SETTINGS_FILE = './guildSettings.json';
 
 // البوت سيقوم بقراءة الملف إذا كان موجوداً، أو سيبدأ بكائن فارغ إذا لم يكن موجوداً
-let guildSettings = fs.existsSync(SETTINGS_FILE) 
-    ? JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) 
+let guildSettings = fs.existsSync(SETTINGS_FILE)
+    ? JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
     : {};
 
 // دالة نستخدمها لحفظ أي تعديل جديد فوراً في الملف
@@ -52,7 +52,7 @@ function initGuildSettings(guildId) {
         });
     }
     // حفظ في الملف تلقائياً
-    saveSettingsToFile(); 
+    saveSettingsToFile();
 }
 
 // ==========================================
@@ -77,37 +77,37 @@ client.on('messageDelete', async (message) => {
             executor = `<@${deletionLog.executor.id}>`;
             executorTarget = deletionLog.executor;
         }
-    } catch (e) {}
+    } catch (e) { }
 
-   const embed = new EmbedBuilder()
-    .setTitle('سجل حذف رسالة')
-    .setColor('#ef4444')
-    .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
-    .addFields(
-        { 
-            name: 'المسؤول عن الحذف:', 
-            // إذا لم يجد المسؤول، يكتب "غير معروف" لتجنب الكراش
-            value: executor ? `<@${executor.id}>` : 'غير معروف (أو صاحب الرسالة)', 
-            inline: true 
-        },
-        { 
-            name: 'صاحب الرسالة الأصلية:', 
-            value: `<@${message.author.id}>`, 
-            inline: true 
-        },
-        { 
-            name: 'نص الرسالة المحذوفة:', 
-            // تأمين النص للتأكد أنه ليس فارغاً بأي شكل
-            value: `\`\`\`${(message.content && message.content.trim()) ? message.content : 'محتوى ميديا أو إيموجي فقط'}\`\`\`` 
-        }
-    )
-    // استخدام الـ Avatar الخاص بالمسؤول إن وجد، أو لوجو السيرفر كبديل
-    .setThumbnail(executorTarget ? executorTarget.displayAvatarURL({ dynamic: true }) : message.guild.iconURL({ dynamic: true }))
-    .setTimestamp();
+    const embed = new EmbedBuilder()
+        .setTitle('سجل حذف رسالة')
+        .setColor('#ef4444')
+        .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
+        .addFields(
+            {
+                name: 'المسؤول عن الحذف:',
+                // تم تعديل هذا السطر ليمرر المنشن الجاهز مباشرة بدون كراش أو خطأ
+                value: executor || 'غير معروف (أو صاحب الرسالة)',
+                inline: true
+            },
+            {
+                name: 'صاحب الرسالة الأصلية:',
+                value: `<@${message.author.id}>`,
+                inline: true
+            },
+            {
+                name: 'نص الرسالة المحذوفة:',
+                // تأمين النص للتأكد أنه ليس فارغاً بأي شكل
+                value: `\`\`\`${(message.content && message.content.trim()) ? message.content : 'محتوى ميديا أو إيموجي فقط'}\`\`\``
+            }
+        )
+        // استخدام الـ Avatar الخاص بالمسؤول إن وجد، أو لوجو السيرفر كبديل
+        .setThumbnail(executorTarget ? executorTarget.displayAvatarURL({ dynamic: true }) : message.guild.iconURL({ dynamic: true }))
+        .setTimestamp();
 
-logChannel.send({ embeds: [embed] }).catch((err) => console.error("فشل إرسال سجل الحذف:", err));
-
+    logChannel.send({ embeds: [embed] }).catch((err) => console.error("فشل إرسال سجل الحذف:", err));
 });
+
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
     if (oldMessage.content === newMessage.content) return;
@@ -130,7 +130,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
         .setThumbnail(oldMessage.author.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
 
-    logChannel.send({ embeds: [embed] }).catch(() => {});
+    logChannel.send({ embeds: [embed] }).catch(() => { });
 });
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     if (!oldMember.guild) return;
@@ -143,20 +143,47 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
     const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
-    // 1. حالة إعطاء تايم آوت جديد
+    // 1. حالة إعطاء تايم آوت جديد (خنق)
     if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
-        // الانتظار ثانية لضمان تسجيل اسم الإداري الحقيقي في سيرفرات ديسكورد
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
         let executor = 'مشرف مجهول';
+
         try {
-            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 5, type: AuditLogEvent.MemberUpdate });
-            const auditEntry = fetchedLogs.entries.find(entry => 
-                entry.target.id === newMember.id && 
-                entry.changes.some(c => c.key === 'communication_disabled_until')
-            );
-            if (auditEntry) executor = `<@${auditEntry.executor.id}>`;
-        } catch (e) {}
+            // جلب سجل التدقيق لمعرفة من قام بالحركة برأي ديسكورد
+            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
+            const auditEntry = fetchedLogs.entries.first();
+            
+            if (auditEntry && auditEntry.target.id === newMember.id) {
+                // إذا كان المنفذ بوتاً (مثل فالور)، نبحث عن الشخص الحقيقي الذي منشن العضو المعاقب
+                if (auditEntry.executor.bot) {
+                    // جلب الرسائل الأخيرة من الروم الذي حدثت فيه العقوبة
+                    const textChannels = newMember.guild.channels.cache.filter(c => c.type === 0);
+                    
+                    for (const [_, channel] of textChannels) {
+                        try {
+                            const messages = await channel.messages.fetch({ limit: 5 });
+                            // البحث عن رسالة تحتوي كلمة خنق ومنشن للشخص المعاقب بالثانية والآيدي
+                            const triggerMessage = messages.find(m => 
+                                !m.author.bot && 
+                                m.content.includes('خنق') && 
+                                (m.mentions.users.has(newMember.id) || m.content.includes(newMember.id)) &&
+                                (Date.now() - m.createdTimestamp) < 30000 // كتبت في آخر 30 ثانية فقط
+                            );
+                            
+                            if (triggerMessage) {
+                                executor = `<@${triggerMessage.author.id}>`; // الشخص الحقيقي اللي كتب الأمر
+                                break;
+                            }
+                        } catch (e) {}
+                    }
+                    
+                    // إذا لم نجد الرسالة لأي سبب، نضع البوت المنفذ كبديل بدلاً من "مشرف مجهول"
+                    if (executor === 'مشرف مجهول') executor = `<@${auditEntry.executor.id}>`;
+                } else {
+                    // إذا تم إعطاء التايم آوت يدوياً بالماوس من مشرف حقيقي
+                    executor = `<@${auditEntry.executor.id}>`;
+                }
+            }
+        } catch (e) { }
 
         const totalSeconds = Math.round((newTimeout - Date.now()) / 1000);
         const durationText = totalSeconds < 60 ? `${totalSeconds} ثانية` : `${Math.round(totalSeconds / 60)} دقيقة`;
@@ -172,26 +199,17 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
 
-        logChannel.send({ embeds: [embed] }).catch(() => {});
-    } 
-    // 2. حالة فك التايم آوت
+        logChannel.send({ embeds: [embed] }).catch(() => { });
+    }
+    // 2. حالة فك التايم آوت تترك كما هي دون تغيير
     else if (oldTimeout && oldTimeout > Date.now() && (!newTimeout || newTimeout <= Date.now())) {
-        // الانتظار ثانية لضمان تسجيل السجل بدقة
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
         let executor = 'انتهاء مدة العقوبة التلقائي';
         try {
-            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 5, type: AuditLogEvent.MemberUpdate });
-            const auditEntry = fetchedLogs.entries.find(entry => 
-                entry.target.id === newMember.id && 
-                entry.changes.some(c => c.key === 'communication_disabled_until')
-            );
-            if (auditEntry) {
+            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
+            const auditEntry = fetchedLogs.entries.first();
+            if (auditEntry && auditEntry.target.id === newMember.id) {
                 const change = auditEntry.changes.find(c => c.key === 'communication_disabled_until');
-                // إذا وجدنا أن القيمة الجديدة فارغة، يعني أن مشرفاً قام بفك التايم آوت يدوياً
-                if (change && change.old && !change.new) {
-                    executor = `<@${auditEntry.executor.id}>`;
-                }
+                if (change && change.old && !change.new) executor = `<@${auditEntry.executor.id}>`;
             }
         } catch (e) {}
 
@@ -205,9 +223,10 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
 
-        logChannel.send({ embeds: [embed] }).catch(() => {});
+        logChannel.send({ embeds: [embed] }).catch(() => { });
     }
 });
+
 
 
 // ==========================================
