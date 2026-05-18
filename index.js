@@ -228,7 +228,7 @@ app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${P
 // ==========================================
 
 function getGuildSelectorHtml(guildsList) {
-    const botInviteUrl = `https://discord.com{client.user ? client.user.id : ''}&permissions=8&scope=bot`;
+    const botInviteUrl = `https://discord.com/oauth2/authorize?client_id=${client.user ? client.user.id : ''}&permissions=8&scope=bot`;
 
     let cardsHtml = guildsList.map(g => `
         <div class="server-card">
