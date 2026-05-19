@@ -61,6 +61,7 @@ function initGuildSettings(guildId) {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
+    // التحقق مما إذا كانت الرسالة تحتوي على كلمة "خنق" وتحتوي على منشن لعضو واحد على الأقل
     if (message.content.includes('خنق') && message.mentions.members.size > 0) {
         const settings = guildSettings[message.guild.id];
         if (!settings || !settings.timeoutLogChannelId) return;
@@ -68,6 +69,7 @@ client.on('messageCreate', async (message) => {
         const logChannel = message.guild.channels.cache.get(settings.timeoutLogChannelId);
         if (!logChannel) return;
 
+        // جلب العضو الممنشن الأول (باستثناء البوتات وصاحب الرسالة إن وجد)
         const targetMember = message.mentions.members.first();
 
         const embed = new EmbedBuilder()
@@ -126,12 +128,14 @@ client.on('messageDelete', async (message) => {
 
     const sendOptions = { embeds: [embed] };
 
+    // إذا كانت الرسالة تحتوي على ميديا، نرفق الملف مباشرة لضمان ظهوره حتى لو حُذف الرابط
     if (hasAttachment && firstAttachment) {
         sendOptions.files = [{
             attachment: firstAttachment.url,
             name: firstAttachment.name
         }];
         
+        // إذا كان المرفق صورة، نجعلها تظهر داخل الإيمبد بشكل أنيق عبر اسمها المرفق
         if (firstAttachment.contentType?.startsWith('image/')) {
             embed.setImage(`attachment://${firstAttachment.name}`);
         }
@@ -228,33 +232,11 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 
 // ==========================================
-// مسارات واجهة المستخدم المباشرة (Express App)
+// مسارات واجهة المستخدم المباشرة
 // ==========================================
 
 app.get('/', (req, res) => {
-    // تعديل ذكي: إضافة ميزة إعادة التحديث التلقائي إذا لم يكتمل إقلاع البوت بالكامل بعد
-    if (!client.user) {
-        return res.send(`
-            <!DOCTYPE html>
-            <html lang="ar" dir="rtl">
-            <head>
-                <meta charset="UTF-8">
-                <meta http-equiv="refresh" content="4">
-                <title>جاري تشغيل النظام</title>
-                <style>
-                    body { background: #0f172a; color: #94a3b8; font-family: sans-serif; text-align: center; padding-top: 100px; }
-                    .loader { border: 4px solid #334155; border-top: 4px solid #38bdf8; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-                    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                </style>
-            </head>
-            <body>
-                <div class="loader"></div>
-                <h2>جاري تشغيل البوت والاتصال بقاعدة البيانات...</h2>
-                <p>ستفتح لوحة التحكم تلقائياً خلال ثوانٍ، يرجى عدم إغلاق الصفحة.</p>
-            </body>
-            </html>
-        `);
-    }
+    if (!client.user) return res.send('جاري تشغيل البوت، انتظر ثواني واعمل تحديث للصفحة.');
 
     let botGuilds = client.guilds.cache.map(g => {
         return {
@@ -301,16 +283,15 @@ if (process.env.DISCORD_TOKEN) {
     client.login(process.env.DISCORD_TOKEN).catch(err => console.error(err.message));
 }
 
-// البورت 10000 متوافق مباشرة مع إعدادات Render الافتراضية المكتوبة باللوق لديك
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${PORT}`));
 
 // ==========================================
-// قوالب الـ HTML وعلاج انقطاع الكود
+// قوالب الـ HTML
 // ==========================================
 
 function getGuildSelectorHtml(guildsList) {
-    const botInviteUrl = `https://discord.com{client.user ? client.user.id : ''}&permissions=8&scope=bot`;
+   const botInviteUrl = `https://discord.com/oauth2/authorize?client_id=${client.user ? client.user.id : ''}&permissions=8&scope=bot`;
 
     let cardsHtml = guildsList.map(g => `
         <div class="server-card">
@@ -374,17 +355,17 @@ function getManageServerHtml(guild, textChannels, settings) {
         <option value="${c.id}" ${settings.timeoutLogChannelId === c.id ? 'selected' : ''}>#${c.name}</option>
     `).join('');
 
-    // إكمال كود استعراض الرومات وصندوق الـ Checkbox الذي قُطع في الرسالة الأخيرة
-    let roomsRows = textChannels.map(c => {
-        const isChecked = settings.monitoredRooms[c.id] !== false ? 'checked' : '';
-        return `
+    let roomsRows = textChannels.map(c => `
         <tr>
             <td style="padding: 12px; border-bottom: 1px solid var(--bg-a);"><strong>#${c.name}</strong></td>
             <td style="padding: 12px; border-bottom: 1px solid var(--bg-a); text-align: left;">
-                <input type="checkbox" name="enabledMessageRooms" value="${c.id}" ${isChecked} style="width:18px; height:18px; cursor:pointer;">
+                <label class="switch">
+                    <input type="checkbox" name="enabledMessageRooms" value="${c.id}" ${settings.monitoredRooms[c.id] ? 'checked' : ''}>
+                    <span class="slider font-toggle"></span>
+                </label>
             </td>
-        </tr>`;
-    }).join('');
+        </tr>
+    `).join('');
 
     return `
     <!DOCTYPE html>
@@ -395,56 +376,73 @@ function getManageServerHtml(guild, textChannels, settings) {
         <style>
             :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; --green: #22c55e; }
             * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { background: var(--bg-p); color: var(--text); padding: 40px 20px; }
-            .container { max-width: 700px; margin: 0 auto; background: var(--bg-s); border: 1px solid var(--bg-a); border-radius: 12px; padding: 30px; }
-            h2 { margin-bottom: 25px; font-size: 22px; border-bottom: 1px solid var(--bg-a); padding-bottom: 15px; }
-            .form-group { margin-bottom: 20px; }
-            label { display: block; font-size: 14px; color: var(--text-m); margin-bottom: 8px; font-weight: 600; }
-            select { width: 100%; padding: 10px; background: var(--bg-p); border: 1px solid var(--bg-a); color: #fff; border-radius: 6px; font-size: 14px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th { text-align: right; color: var(--text-m); font-size: 13px; padding-bottom: 10px; border-bottom: 2px solid var(--bg-a); }
-            .save-btn { background: var(--blue); color: var(--bg-p); border: none; padding: 12px 20px; width: 100%; font-weight: bold; font-size: 15px; border-radius: 6px; cursor: pointer; margin-top: 25px; transition: 0.2s; }
-            .save-btn:hover { background: #0ea5e9; }
-            .back-link { display: inline-block; margin-top: 15px; color: var(--text-m); text-decoration: none; font-size: 13px; }
-            .back-link:hover { color: #fff; }
+            body { display: flex; background: var(--bg-p); color: var(--text); }
+            .sidebar { width: 260px; background: var(--bg-s); border-left: 1px solid var(--bg-a); position: fixed; right: 0; top: 0; bottom: 0; padding: 30px 20px; }
+            .sidebar h2 { font-size: 20px; color: var(--blue); margin-bottom: 30px; text-align: center; }
+            .sidebar a { display: block; padding: 12px; color: var(--text); text-decoration: none; background: var(--bg-a); border-radius: 8px; font-weight: bold; text-align: center; }
+            .main-content { margin-right: 260px; padding: 40px; width: calc(100% - 260px); }
+            .card { background: var(--bg-s); border: 1px solid var(--bg-a); padding: 25px; border-radius: 12px; margin-bottom: 30px; }
+            .card h3 { font-size: 18px; margin-bottom: 15px; color: var(--blue); border-bottom: 1px solid var(--bg-a); padding-bottom: 10px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+            select { width: 100%; padding: 12px; background: var(--bg-p); border: 1px solid var(--bg-a); color: var(--text); border-radius: 8px; outline: none; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            .btn-save { background: var(--green); color: white; border: none; padding: 12px 30px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; width: 100%; transition: 0.3s; }
+            .btn-save:hover { opacity: 0.9; }
+            
+            /* تفعيل الـ Switch */
+            .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--bg-a); transition: .4s; border-radius: 34px; }
+            .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+            input:checked + .slider { background-color: var(--blue); }
+            input:checked + .slider:before { transform: translateX(-24px); }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h2>⚙️ إعدادات سيرفر: ${guild.name}</h2>
+        <div class="sidebar">
+            <h2>لوحة التحكم</h2>
+            <a href="/">العودة للسيرفرات</a>
+        </div>
+        <div class="main-content">
+            <h1 style="margin-bottom: 25px;">إعدادات سيرفر: ${guild.name}</h1>
             <form action="/update/${guild.id}" method="POST">
-                <div class="form-group">
-                    <label>روم تسجيل الرسائل المحذوفة والمعدلة:</label>
-                    <select name="mainMessageChannel">
-                        <option value="">-- لم يتم الاختيار --</option>
-                        ${selectMessageOptions}
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>روم تسجيل عقوبات التايم أوت (وبلاغات كلمة خنق):</label>
-                    <select name="mainTimeoutChannel">
-                        <option value="">-- لم يتم الاختيار --</option>
-                        ${selectTimeoutOptions}
-                    </select>
+                <div class="card">
+                    <h3>رومات السجلات المعتمدة (Logs)</h3>
+                    <div class="grid">
+                        <div>
+                            <label style="display:block; margin-bottom:8px; font-size:14px; color:var(--text-m);">روم سجل الرسائل (حذف وتعديل):</label>
+                            <select name="mainMessageChannel">
+                                <option value="">تعطيل السجل</option>
+                                ${selectMessageOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display:block; margin-bottom:8px; font-size:14px; color:var(--text-m);">روم سجل العقوبات والتايم أوت:</label>
+                            <select name="mainTimeoutChannel">
+                                <option value="">تعطيل السجل</option>
+                                ${selectTimeoutOptions}
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
-                <h3 style="font-size:16px; margin: 30px 0 10px 0; color:var(--blue);">🔒 الرومات المشمولة بالرقابة والمتابعة:</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>اسم الروم</th>
-                            <th style="text-align: left;">تفعيل المراقبة</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${roomsRows}
-                    </tbody>
-                </table>
-
-                <button type="submit" class="save-btn">حفظ وتطبيق الإعدادات الحالية ✨</button>
+                <div class="card">
+                    <h3>مراقبة الغرف الفردية (الرسائل)</h3>
+                    <p style="font-size:14px; color:var(--text-m);">حدد الرومات التي تريد من البوت رصد الحذف والتعديل بداخلها:</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="text-align: right; padding: 12px; border-bottom: 2px solid var(--bg-a); color:var(--blue);">اسم الروم</th>
+                                <th style="text-align: left; padding: 12px; border-bottom: 2px solid var(--bg-a); color:var(--blue);">حالة المراقبة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${roomsRows}
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit" class="btn-save">حفظ جميع الإعدادات فوراً</button>
             </form>
-            <a href="/" class="back-link">⬅️ العودة لقائمة السيرفرات</a>
         </div>
     </body>
     </html>`;
