@@ -111,31 +111,44 @@ client.on('messageDelete', async (message) => {
     const hasAttachment = message.attachments.size > 0;
     const firstAttachment = hasAttachment ? message.attachments.first() : null;
     
+    // 🛠️ معالجة نص الرسالة لضمان عدم بقائه فارغاً أو تجاوز الحد المسموح (1024 حرفاً)
+    let rawContent = (message.content && message.content.trim()) 
+        ? message.content 
+        : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : 'محتوى ميديا أو إيموجي فقط');
+
+    // إذا كان النص طويلاً جداً نقوم بقصه حتى لا يتحطم البوت
+    if (rawContent.length > 1000) {
+        rawContent = rawContent.slice(0, 1000) + '... (تم اختصار النص لطوله)';
+    }
+
+    const finalContent = `\`\`\`\n${rawContent}\n\`\`\``;
+
     const embed = new EmbedBuilder()
         .setTitle('سجل حذف رسالة')
         .setColor('#ef4444')
         .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
         .addFields(
-            { name: 'المسؤول عن الحذف:', value: executor || 'غير معروف (أو صاحب الرسالة)', inline: true },
-            { name: 'صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
-            { 
-                name: 'نص الرسالة المحذوفة:', 
-                value: `\`\`\`${(message.content && message.content.trim()) ? message.content : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : 'محتوى ميديا أو إيموجي فقط')}\`\`\`` 
-            }
+            { name: 'المسؤول عن الحذف:', value: String(executor || 'غير معروف'), inline: true },
+            { name: 'صاحب الرسالة الأصلية:', value: String(`<@${message.author.id}>`), inline: true },
+            { name: 'نص الرسالة المحذوفة:', value: finalContent }
         )
-        .setThumbnail(executorTarget ? executorTarget.displayAvatarURL({ dynamic: true }) : message.guild.iconURL({ dynamic: true }))
         .setTimestamp();
+
+    // تأمين الصور الرمزية (Avatar) من القيمة الفارغة
+    if (executorTarget) {
+        embed.setThumbnail(executorTarget.displayAvatarURL({ dynamic: true }));
+    } else if (message.guild.iconURL()) {
+        embed.setThumbnail(message.guild.iconURL({ dynamic: true }));
+    }
 
     const sendOptions = { embeds: [embed] };
 
-    // إذا كانت الرسالة تحتوي على ميديا، نرفق الملف مباشرة لضمان ظهوره حتى لو حُذف الرابط
     if (hasAttachment && firstAttachment) {
         sendOptions.files = [{
             attachment: firstAttachment.url,
             name: firstAttachment.name
         }];
         
-        // إذا كان المرفق صورة، نجعلها تظهر داخل الإيمبد بشكل أنيق عبر اسمها المرفق
         if (firstAttachment.contentType?.startsWith('image/')) {
             embed.setImage(`attachment://${firstAttachment.name}`);
         }
@@ -143,6 +156,7 @@ client.on('messageDelete', async (message) => {
 
     logChannel.send(sendOptions).catch((err) => console.error("فشل إرسال سجل الحذف:", err));
 });
+
 
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
