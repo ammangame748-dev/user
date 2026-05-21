@@ -61,7 +61,6 @@ function initGuildSettings(guildId) {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // التحقق مما إذا كانت الرسالة تحتوي على كلمة "خنق" وتحتوي على منشن لعضو واحد على الأقل
     if (message.content.includes('خنق') && message.mentions.members.size > 0) {
         const settings = guildSettings[message.guild.id];
         if (!settings || !settings.timeoutLogChannelId) return;
@@ -69,8 +68,8 @@ client.on('messageCreate', async (message) => {
         const logChannel = message.guild.channels.cache.get(settings.timeoutLogChannelId);
         if (!logChannel) return;
 
-        // جلب العضو الممنشن الأول (باستثناء البوتات وصاحب الرسالة إن وجد)
         const targetMember = message.mentions.members.first();
+        if (!targetMember) return;
 
         const embed = new EmbedBuilder()
             .setTitle('بلاغ رصد كلمة خنق')
@@ -79,7 +78,7 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: 'بواسطة الشخص:', value: `<@${message.author.id}>`, inline: true },
                 { name: 'الشخص المستهدف (المنشن):', value: `<@${targetMember.id}>`, inline: true },
-                { name: 'نص الرسالة كاملاً:', value: `\`\`\`${message.content}\`\`\`` }
+                { name: 'نص الرسالة كاملاً:', value: `\`\`\`${message.content.slice(0, 1000) || 'لا يوجد نص'}\`\`\`` }
             )
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
@@ -111,30 +110,28 @@ client.on('messageDelete', async (message) => {
     const hasAttachment = message.attachments.size > 0;
     const firstAttachment = hasAttachment ? message.attachments.first() : null;
     
-    // 🛠️ معالجة نص الرسالة لضمان عدم بقائه فارغاً أو تجاوز الحد المسموح (1024 حرفاً)
     let rawContent = (message.content && message.content.trim()) 
         ? message.content 
         : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : 'محتوى ميديا أو إيموجي فقط');
 
-    // إذا كان النص طويلاً جداً نقوم بقصه حتى لا يتحطم البوت
     if (rawContent.length > 1000) {
         rawContent = rawContent.slice(0, 1000) + '... (تم اختصار النص لطوله)';
     }
 
     const finalContent = `\`\`\`\n${rawContent}\n\`\`\``;
 
+    // إصلاح وتأمين الحقول بالكامل هنا عبر التحقق الصارم لضمان عدم تمرير قيم فارغة
     const embed = new EmbedBuilder()
         .setTitle('سجل حذف رسالة')
         .setColor('#ef4444')
         .setDescription(`تم حذف رسالة في الروم: <#${message.channel.id}>`)
         .addFields(
-            { name: 'المسؤول عن الحذف:', value: String(executor || 'غير معروف'), inline: true },
-            { name: 'صاحب الرسالة الأصلية:', value: String(`<@${message.author.id}>`), inline: true },
-            { name: 'نص الرسالة المحذوفة:', value: finalContent }
+            { name: 'المسؤول عن الحذف:', value: executor && executor.trim() ? executor : 'غير معروف', inline: true },
+            { name: 'صاحب الرسالة الأصلية:', value: `<@${message.author.id}>`, inline: true },
+            { name: 'نص الرسالة المحذوفة:', value: finalContent && finalContent.trim() ? finalContent : '\`\`\`محتوى فارغ\`\`\`' }
         )
         .setTimestamp();
 
-    // تأمين الصور الرمزية (Avatar) من القيمة الفارغة
     if (executorTarget) {
         embed.setThumbnail(executorTarget.displayAvatarURL({ dynamic: true }));
     } else if (message.guild.iconURL()) {
@@ -157,7 +154,6 @@ client.on('messageDelete', async (message) => {
     logChannel.send(sendOptions).catch((err) => console.error("فشل إرسال سجل الحذف:", err));
 });
 
-
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
     if (oldMessage.content === newMessage.content) return;
@@ -168,14 +164,17 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
     const logChannel = oldMessage.guild.channels.cache.get(settings.messageLogChannelId);
     if (!logChannel) return;
 
+    const oldContent = oldMessage.content?.slice(0, 1000) || 'فارغ';
+    const newContent = newMessage.content?.slice(0, 1000) || 'فارغ';
+
     const embed = new EmbedBuilder()
         .setTitle('سجل تعديل رسالة')
         .setColor('#ca8a04')
         .setDescription(`تم تعديل رسالة في الروم: <#${oldMessage.channel.id}>`)
         .addFields(
             { name: 'صاحب الرسالة المعدل:', value: `<@${oldMessage.author.id}>`, inline: false },
-            { name: 'المحتوى قبل التعديل:', value: `\`\`\`${oldMessage.content || 'فارغ'}\`\`\`` },
-            { name: 'المحتوى بعد التعديل:', value: `\`\`\`${newMessage.content || 'فارغ'}\`\`\`` }
+            { name: 'المحتوى قبل التعديل:', value: `\`\`\`${oldContent}\`\`\`` },
+            { name: 'المحتوى بعد التعديل:', value: `\`\`\`${newContent}\`\`\`` }
         )
         .setThumbnail(oldMessage.author.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
@@ -211,7 +210,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setTitle('سجل عقوبة تايم أوت')
             .setColor('#38bdf8')
             .addFields(
-                { name: 'من قام بإعطاء التايم أوت:', value: executor, inline: true },
+                { name: 'من قام بإعطاء التايم أوت:', value: executor && executor.trim() ? executor : 'مشرف مجهول', inline: true },
                 { name: 'العضو المعاقب:', value: `<@${newMember.id}>`, inline: true },
                 { name: 'مدة العقوبة الزمنية:', value: `\`${durationText}\``, inline: false }
             )
@@ -235,7 +234,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             .setTitle('سجل فك عقوبة التايم أوت')
             .setColor('#22c55e')
             .addFields(
-                { name: 'المسؤول عن فك العقوبة:', value: executor, inline: true },
+                { name: 'المسؤول عن فك العقوبة:', value: executor && executor.trim() ? executor : 'تلقائي', inline: true },
                 { name: 'العضو الذي تم فك العقوبة عنه:', value: `<@${newMember.id}>`, inline: true }
             )
             .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
@@ -301,7 +300,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${PORT}`));
 
 // ==========================================
-// قوالب الـ HTML
+// قوالب الـ HTML (تم إكمال الأكواد المقطوعة بالكامل)
 // ==========================================
 
 function getGuildSelectorHtml(guildsList) {
@@ -348,38 +347,36 @@ function getGuildSelectorHtml(guildsList) {
             <header>
                 <div>
                     <h1>لوحة الإدارة المركزية للبوت</h1>
-                    <p style="color: var(--text-m); font-size:14px; margin-top:5px;">اختر السيرفر المتصل به البوت حالياً لتخصيص رومات اللوق والفلاتر فوراً.</p>
+                    <p style="color: var(--text-m); margin-top: 5px;">اختر السيرفر الذي ترغب في تعديل إعدادات اللوق والرقابة له.</p>
                 </div>
-                <a href="${botInviteUrl}" target="_blank" class="invite-btn">إضافة البوت لسيرفر جديد</a>
+                <a href="${botInviteUrl}" target="_blank" class="invite-btn">دعوة البوت لسيرفر جديد</a>
             </header>
-            <div class="server-grid">
-                ${cardsHtml || '<p style="color:var(--text-m);">جاري تحميل السيرفرات المشتركة...</p>'}
-            </div>
+            <div class="server-grid">${cardsHtml}</div>
         </div>
     </body>
     </html>`;
 }
 
 function getManageServerHtml(guild, textChannels, settings) {
-    let selectMessageOptions = textChannels.map(c => `
-        <option value="${c.id}" ${settings.messageLogChannelId === c.id ? 'selected' : ''}>#${c.name}</option>
-    `).join('');
+    let optionsHtml = textChannels.map(c => {
+        const isMainMsg = settings.messageLogChannelId === c.id ? 'selected' : '';
+        return `<option value="${c.id}" ${isMainMsg}># ${c.name}</option>`;
+    }).join('');
 
-    let selectTimeoutOptions = textChannels.map(c => `
-        <option value="${c.id}" ${settings.timeoutLogChannelId === c.id ? 'selected' : ''}>#${c.name}</option>
-    `).join('');
+    let timeoutOptionsHtml = textChannels.map(c => {
+        const isMainTime = settings.timeoutLogChannelId === c.id ? 'selected' : '';
+        return `<option value="${c.id}" ${isMainTime}># ${c.name}</option>`;
+    }).join('');
 
-    let roomsRows = textChannels.map(c => `
-        <tr>
-            <td style="padding: 12px; border-bottom: 1px solid var(--bg-a);"><strong>#${c.name}</strong></td>
-            <td style="padding: 12px; border-bottom: 1px solid var(--bg-a); text-align: left;">
-                <label class="switch">
-                    <input type="checkbox" name="enabledMessageRooms" value="${c.id}" ${settings.monitoredRooms[c.id] ? 'checked' : ''}>
-                    <span class="slider font-toggle"></span>
-                </label>
-            </td>
-        </tr>
-    `).join('');
+    let checkboxesHtml = textChannels.map(c => {
+        const isMonitored = settings.monitoredRooms[c.id] !== false ? 'checked' : '';
+        return `
+            <label class="room-checkbox-label">
+                <input type="checkbox" name="enabledMessageRooms" value="${c.id}" ${isMonitored}>
+                <span># ${c.name}</span>
+            </label>
+        `;
+    }).join('');
 
     return `
     <!DOCTYPE html>
@@ -388,74 +385,47 @@ function getManageServerHtml(guild, textChannels, settings) {
         <meta charset="UTF-8">
         <title>إدارة سيرفر | ${guild.name}</title>
         <style>
-            :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; --green: #22c55e; }
+            :root { --bg-p: #0f172a; --bg-s: #1e293b; --bg-a: #334155; --text: #f8fafc; --text-m: #94a3b8; --blue: #38bdf8; }
             * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { display: flex; background: var(--bg-p); color: var(--text); }
-            .sidebar { width: 260px; background: var(--bg-s); border-left: 1px solid var(--bg-a); position: fixed; right: 0; top: 0; bottom: 0; padding: 30px 20px; }
-            .sidebar h2 { font-size: 20px; color: var(--blue); margin-bottom: 30px; text-align: center; }
-            .sidebar a { display: block; padding: 12px; color: var(--text); text-decoration: none; background: var(--bg-a); border-radius: 8px; font-weight: bold; text-align: center; }
-            .main-content { margin-right: 260px; padding: 40px; width: calc(100% - 260px); }
-            .card { background: var(--bg-s); border: 1px solid var(--bg-a); padding: 25px; border-radius: 12px; margin-bottom: 30px; }
-            .card h3 { font-size: 18px; margin-bottom: 15px; color: var(--blue); border-bottom: 1px solid var(--bg-a); padding-bottom: 10px; }
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
-            select { width: 100%; padding: 12px; background: var(--bg-p); border: 1px solid var(--bg-a); color: var(--text); border-radius: 8px; outline: none; }
-            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-            .btn-save { background: var(--green); color: white; border: none; padding: 12px 30px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; width: 100%; transition: 0.3s; }
-            .btn-save:hover { opacity: 0.9; }
-            
-            /* تفعيل الـ Switch */
-            .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
-            .switch input { opacity: 0; width: 0; height: 0; }
-            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--bg-a); transition: .4s; border-radius: 34px; }
-            .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-            input:checked + .slider { background-color: var(--blue); }
-            input:checked + .slider:before { transform: translateX(-24px); }
+            body { background: var(--bg-p); color: var(--text); padding: 40px 20px; }
+            .container { max-width: 700px; margin: 0 auto; background: var(--bg-s); border: 1px solid var(--bg-a); padding: 30px; border-radius: 12px; }
+            h2 { margin-bottom: 20px; border-bottom: 1px solid var(--bg-a); padding-bottom: 10px; }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
+            select, button { width: 100%; padding: 12px; border-radius: 6px; background: var(--bg-p); color: var(--text); border: 1px solid var(--bg-a); font-size: 14px; }
+            .rooms-list { background: var(--bg-p); border: 1px solid var(--bg-a); padding: 15px; border-radius: 6px; max-height: 250px; overflow-y: auto; }
+            .room-checkbox-label { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer; }
+            button[type="submit"] { background: var(--blue); color: var(--bg-p); font-weight: bold; border: none; cursor: pointer; margin-top: 10px; transition: 0.2s; }
+            button[type="submit"]:hover { opacity: 0.9; }
+            .back-btn { display: inline-block; margin-bottom: 20px; color: var(--blue); text-decoration: none; font-size: 14px; }
         </style>
     </head>
     <body>
-        <div class="sidebar">
-            <h2>لوحة التحكم</h2>
-            <a href="/">العودة للسيرفرات</a>
-        </div>
-        <div class="main-content">
-            <h1 style="margin-bottom: 25px;">إعدادات سيرفر: ${guild.name}</h1>
+        <div class="container">
+            <a href="/" class="back-btn">← العودة للرئيسية</a>
+            <h2>إعدادات الرقابة: ${guild.name}</h2>
             <form action="/update/${guild.id}" method="POST">
-                <div class="card">
-                    <h3>رومات السجلات المعتمدة (Logs)</h3>
-                    <div class="grid">
-                        <div>
-                            <label style="display:block; margin-bottom:8px; font-size:14px; color:var(--text-m);">روم سجل الرسائل (حذف وتعديل):</label>
-                            <select name="mainMessageChannel">
-                                <option value="">تعطيل السجل</option>
-                                ${selectMessageOptions}
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display:block; margin-bottom:8px; font-size:14px; color:var(--text-m);">روم سجل العقوبات والتايم أوت:</label>
-                            <select name="mainTimeoutChannel">
-                                <option value="">تعطيل السجل</option>
-                                ${selectTimeoutOptions}
-                            </select>
-                        </div>
+                <div class="form-group">
+                    <label>روم لوق الرسائل الرئيسي (الحذف والتعديل):</label>
+                    <select name="mainMessageChannel">
+                        <option value="">-- اختر روم اللوق --</option>
+                        ${optionsHtml}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>روم لوق العقوبات والتايم أوت وبلاغات الخنق:</label>
+                    <select name="mainTimeoutChannel">
+                        <option value="">-- اختر روم اللوق --</option>
+                        ${timeoutOptionsHtml}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>الرومات المشمولة في رقابة حذف وتعديل الرسائل:</label>
+                    <div class="rooms-list">
+                        ${checkboxesHtml}
                     </div>
                 </div>
-
-                <div class="card">
-                    <h3>مراقبة الغرف الفردية (الرسائل)</h3>
-                    <p style="font-size:14px; color:var(--text-m);">حدد الرومات التي تريد من البوت رصد الحذف والتعديل بداخلها:</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="text-align: right; padding: 12px; border-bottom: 2px solid var(--bg-a); color:var(--blue);">اسم الروم</th>
-                                <th style="text-align: left; padding: 12px; border-bottom: 2px solid var(--bg-a); color:var(--blue);">حالة المراقبة</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${roomsRows}
-                        </tbody>
-                    </table>
-                </div>
-                <button type="submit" class="btn-save">حفظ جميع الإعدادات فوراً</button>
+                <button type="submit">حفظ التغييرات وتطبيق الإعدادات</button>
             </form>
         </div>
     </body>
