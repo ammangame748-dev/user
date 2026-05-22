@@ -25,12 +25,14 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessageReactions // ميزة رصد الإيموجي
+        GatewayIntentBits.GuildMessageReactions
     ],
-    partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User] // لضمان رصد الرسائل القديمة
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User]
 });
 
-client.once('ready', () => {
+// التعامل مع تحديث اسم الحدث في الإصدارات الجديدة من ديسكورد
+const readyEventName = client.on ? (client.on('clientReady', () => {}) ? 'clientReady' : 'ready') : 'ready';
+client.once(readyEventName, () => {
     console.log(`Bot initialized as: ${client.user.tag}`);
 });
 
@@ -39,9 +41,9 @@ function initGuildSettings(guildId) {
         guildSettings[guildId] = {
             messageLogChannelId: "",
             timeoutLogChannelId: "",
-            reactionLogChannelId: "", // روم لوق الريأكشن الجديد
+            reactionLogChannelId: "",
             monitoredRooms: {},
-            monitoredReactions: {} // رومات رقابة الريأكشن
+            monitoredReactions: {}
         };
     }
     const guild = client.guilds.cache.get(guildId);
@@ -95,7 +97,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 2. سجل حذف الرسائل (مؤمن بالكامل ضد كراش الإيمبد والميديا)
+// 2. سجل حذف الرسائل
 client.on('messageDelete', async (message) => {
     if (message.partial || message.author?.bot || !message.guild) return;
     const settings = guildSettings[message.guild.id];
@@ -121,7 +123,7 @@ client.on('messageDelete', async (message) => {
     
     let rawContent = (message.content && message.content.trim()) 
         ? message.content 
-        : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : (message.embeds.length > 0 ? 'الرسالة عبارة عن إيمبد (Embed) فقط' : 'محتوى ميديا أو إيموجي فقط'));
+        : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : (message.embeds && message.embeds.length > 0 ? 'الرسالة عبارة عن إيمبد (Embed) فقط' : 'محتوى ميديا أو إيموجي فقط'));
 
     if (rawContent.length > 1000) {
         rawContent = rawContent.slice(0, 1000) + '... (تم اختصار النص لطوله)';
@@ -167,13 +169,13 @@ client.on('messageDelete', async (message) => {
     logChannel.send(sendOptions)
         .then(() => {
             if (deletedEmbeds.length > 0) {
-                logChannel.send({ content: `⚠️ **الإيمبد (Embed) الذي تم حذفه بواسطة ${executor}:**`, embeds: deletedEmbeds }).catch(() => {});
+                logChannel.send({ content: `⚠️ ** can الإيمبد (Embed) الذي تم حذفه بواسطة ${executor}:**`, embeds: deletedEmbeds }).catch(() => {});
             }
         })
         .catch((err) => console.error("فشل إرسال سجل الحذف الرئيسي:", err));
 });
 
-// 3. سجل تعديل الرسائل
+// 3. سجل تعديل الرسائل (تم تصحيح متغير الكراش هنا من message إلى oldMessage)
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.partial || oldMessage.author?.bot || !oldMessage.guild) return;
     if (oldMessage.content === newMessage.content) return;
@@ -181,7 +183,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
     const settings = guildSettings[oldMessage.guild.id];
     if (!settings || !settings.monitoredRooms[oldMessage.channel.id]) return;
 
-    const logChannel = message.guild.channels.cache.get(settings.messageLogChannelId);
+    const logChannel = oldMessage.guild.channels.cache.get(settings.messageLogChannelId);
     if (!logChannel) return;
 
     const oldContent = oldMessage.content?.trim() ? oldMessage.content.slice(0, 1000) : 'فارغ أو ميديا';
@@ -226,7 +228,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
         const totalSeconds = Math.round((newTimeout - Date.now()) / 1000);
         const durationText = totalSeconds < 60 ? `${totalSeconds} ثانية` : `${Math.round(totalSeconds / 60)} دقيقة`;
-        const secureDuration = durationText && durationText.trim() ? durationText : 'غير مححدد';
+        const secureDuration = durationText && durationText.trim() ? durationText : 'غير محددة';
 
         const embed = new EmbedBuilder()
             .setTitle('🚫 سجل عقوبة تايم أوت')
@@ -269,7 +271,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 // 5. حدث رصد إضافة تفاعلات الإيموجي (Reaction Add)
 client.on('messageReactionAdd', async (reaction, user) => {
     if (user.bot || !reaction.message.guild) return;
-
     if (reaction.partial) { try { await reaction.fetch(); } catch (e) { return; } }
 
     const settings = guildSettings[reaction.message.guild.id];
@@ -287,6 +288,34 @@ client.on('messageReactionAdd', async (reaction, user) => {
             { name: 'بواسطة العضو:', value: `<@${user.id}>`, inline: true },
             { name: 'الإيموجي المستخدم:', value: `${emojiDisplay} (\`${reaction.emoji.name}\`)`, inline: true },
             { name: 'في الروم:', value: `<#${reaction.message.channel.id}>`, inline: true },
+            { name: 'صاحب الرسالة الأصلية:', value: `<@${reaction.message.author?.id || 'غير معروف'}>`, inline: true },
+            { name: 'رابط الرسالة التفاعلية:', value: `[اضغط هنا للانتقال](${reaction.message.url})`, inline: false }
+        )
+        .setTimestamp();
+
+    logChannel.send({ embeds: [embed] }).catch(() => {});
+});
+
+// 6. حدث رصد إزالة تفاعلات الإيموجي (Reaction Remove)
+client.on('messageReactionRemove', async (reaction, user) => {
+    if (user.bot || !reaction.message.guild) return;
+    if (reaction.partial) { try { await reaction.fetch(); } catch (e) { return; } }
+
+    const settings = guildSettings[reaction.message.guild.id];
+    if (!settings || !settings.reactionLogChannelId || !settings.monitoredReactions[reaction.message.channel.id]) return;
+
+    const logChannel = reaction.message.guild.channels.cache.get(settings.reactionLogChannelId);
+    if (!logChannel) return;
+
+    const emojiDisplay = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
+
+    const embed = new EmbedBuilder()
+        .setTitle('❌ إزالة تفاعل إيموجي')
+        .setColor('#ef4444')
+        .addFields(
+            { name: 'بواسطة العضو:', value: `<@${user.id}>`, inline: true },
+            { name: 'الإيموجي المحذوف:', value: `${emojiDisplay} (\`${reaction.emoji.name}\`)`, inline: true },
+            { name: 'من الروم:', value: `<#${reaction.message.channel.id}>`, inline: true },
             { name: 'صاحب الرسالة الأصلية:', value: `<@${reaction.message.author?.id || 'غير معروف'}>`, inline: true },
             { name: 'رابط الرسالة التفاعلية:', value: `[اضغط هنا للانتقال](${reaction.message.url})`, inline: false }
         )
