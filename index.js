@@ -7,8 +7,8 @@ const express = require('express');
 const fs = require('fs');
 require('dotenv').config({ silent: true });
 
-// استدعاء ملف التصميم والواجهات الجديد الذي سننشئه
-const { getGuildSelectorHtml, getManageServerHtml } = require('./views.js');
+// ابحث عن السطر القديم وحدثه بالاسم الجديد للملف:
+const { getGuildSelectorHtml, getManageServerHtml } = require('./dashboardTemplates.js');
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -38,7 +38,7 @@ const client = new Client({
 });
 
 // التعامل مع تحديث اسم الحدث في الإصدارات الجديدة من ديسكورد
-const readyEventName = client.on ? (client.on('clientReady', () => {}) ? 'clientReady' : 'ready') : 'ready';
+const readyEventName = client.on ? (client.on('clientReady', () => { }) ? 'clientReady' : 'ready') : 'ready';
 client.once(readyEventName, () => {
     console.log(`Bot initialized as: ${client.user.tag}`);
 });
@@ -126,9 +126,9 @@ client.on('messageDelete', async (message) => {
 
     const hasAttachment = message.attachments.size > 0;
     const firstAttachment = hasAttachment ? message.attachments.first() : null;
-    
-    let rawContent = (message.content && message.content.trim()) 
-        ? message.content 
+
+    let rawContent = (message.content && message.content.trim())
+        ? message.content
         : (hasAttachment ? 'تحتوي الرسالة على ملف مرفق (مرفق أدناه)' : (message.embeds && message.embeds.length > 0 ? 'الرسالة عبارة عن إيمبد (Embed) فقط' : 'محتوى ميديا أو إيموجي فقط'));
 
     if (rawContent.length > 1000) {
@@ -165,7 +165,7 @@ client.on('messageDelete', async (message) => {
     if (message.embeds && message.embeds.length > 0) {
         message.embeds.forEach((oldEmbed) => {
             const clonedEmbed = EmbedBuilder.from(oldEmbed);
-            clonedEmbed.setFooter({ 
+            clonedEmbed.setFooter({
                 text: `إيمبد محذوف من روم: #${message.channel.name} | بواسطة: ${executorTarget?.tag || 'غير معروف'}`
             });
             deletedEmbeds.push(clonedEmbed);
@@ -175,7 +175,7 @@ client.on('messageDelete', async (message) => {
     logChannel.send(sendOptions)
         .then(() => {
             if (deletedEmbeds.length > 0) {
-                logChannel.send({ content: `⚠️ **الإيمبد (Embed) الذي تم حذفه:**`, embeds: deletedEmbeds }).catch(() => {});
+                logChannel.send({ content: `⚠️ **الإيمبد (Embed) الذي تم حذفه:**`, embeds: deletedEmbeds }).catch(() => { });
             }
         })
         .catch((err) => console.error("فشل إرسال سجل الحذف الرئيسي:", err));
@@ -261,7 +261,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 const change = auditEntry.changes.find(c => c.key === 'communication_disabled_until');
                 if (change && change.old && !change.new) executor = `<@${auditEntry.executor.id}>`;
             }
-        } catch (e) {}
+        } catch (e) { }
 
         const embed = new EmbedBuilder()
             .setTitle('✅ سجل فك عقوبة التايم أوت')
@@ -302,7 +302,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
         )
         .setTimestamp();
 
-    logChannel.send({ embeds: [embed] }).catch(() => {});
+    logChannel.send({ embeds: [embed] }).catch(() => { });
 });
 
 // 6. حدث رصد إزالة تفاعلات الإيموجي (Reaction Remove)
@@ -330,7 +330,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
         )
         .setTimestamp();
 
-    logChannel.send({ embeds: [embed] }).catch(() => {});
+    logChannel.send({ embeds: [embed] }).catch(() => { });
 });
 // ==========================================
 // الجزء الرابع: مسارات لوحة التحكم وتشغيل السيرفر والبوت
