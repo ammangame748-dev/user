@@ -3,7 +3,7 @@
 // ==========================================
 
 function getGuildSelectorHtml(client, guildsList) {
-    const botInviteUrl = `https://discord.com{client.user ? client.user.id : ''}&permissions=8&scope=bot`;
+    const botInviteUrl = `https://discord.com/oauth2/authorize?client_id=${client.user ? client.user.id : ''}&permissions=8&scope=bot%20applications.commands`;
 
     let cardsHtml = guildsList.map(g => `
         <div class="server-card">
