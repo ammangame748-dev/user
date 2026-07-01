@@ -1,10 +1,11 @@
 // ==========================================
-// الجزء الأول: الإعدادات الموسعة، غرف اللوق الـ 13، ولوق الرسائل والدخول
+// الجزء الأول: الإعدادات، الربط، ونظام حفظ البيانات
 // ==========================================
 
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, Partials, Events } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 require('dotenv').config({ silent: true });
 
 // استدعاء ملف القوالب المحدث
@@ -14,15 +15,40 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const SETTINGS_FILE = './guildSettings.json';
+// مسار ملف الإعدادات - يفضل استخدام مسار مطلق لضمان الوصول
+const SETTINGS_FILE = path.join(__dirname, 'guildSettings.json');
 
-let guildSettings = fs.existsSync(SETTINGS_FILE)
-    ? JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
-    : {};
+let guildSettings = {};
 
-function saveSettingsToFile() {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(guildSettings, null, 4), 'utf8');
+// دالة لتحميل الإعدادات بأمان
+function loadSettings() {
+    try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+            guildSettings = JSON.parse(data);
+            console.log('[SYSTEM] Settings loaded successfully.');
+        } else {
+            guildSettings = {};
+            saveSettingsToFile();
+        }
+    } catch (error) {
+        console.error('[ERROR] Failed to load settings:', error);
+        guildSettings = {};
+    }
 }
+
+// دالة لحفظ الإعدادات بأمان
+function saveSettingsToFile() {
+    try {
+        const data = JSON.stringify(guildSettings, null, 4);
+        fs.writeFileSync(SETTINGS_FILE, data, 'utf8');
+    } catch (error) {
+        console.error('[ERROR] Failed to save settings:', error);
+    }
+}
+
+// تحميل الإعدادات عند بدء التشغيل
+loadSettings();
 
 const client = new Client({
     intents: [
@@ -37,8 +63,7 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User, Partials.GuildMember]
 });
 
-const readyEventName = client.on ? (client.on('clientReady', () => {}) ? 'clientReady' : 'ready') : 'ready';
-client.once(readyEventName, () => {
+client.once(Events.ClientReady, () => {
     console.log(`[PRO BOT] Started successfully as: ${client.user.tag}`);
 });
 
@@ -64,20 +89,22 @@ function initGuildSettings(guildId) {
         };
     }
     
-    // سد النقص للمفاتيح القديمة إذا كانت مفقودة
     const keys = [
         'ticketLogChannelId', 'roleLogChannelId', 'roomLogChannelId', 'memberLogChannelId',
         'timeoutLogChannelId', 'kickLogChannelId', 'banLogChannelId', 'serverLogChannelId',
         'prisonLogChannelId', 'joinLeaveLogChannelId', 'threadLogChannelId', 'adminLogChannelId', 'reactionLogChannelId'
     ];
+    
     keys.forEach(k => {
         if (guildSettings[guildId][k] === undefined) guildSettings[guildId][k] = "";
     });
 
+    if (!guildSettings[guildId].monitoredRooms) guildSettings[guildId].monitoredRooms = {};
+    if (!guildSettings[guildId].monitoredReactions) guildSettings[guildId].monitoredReactions = {};
+
     const guild = client.guilds.cache.get(guildId);
     if (guild) {
-        const textChannels = guild.channels.cache.filter(c => c.type === 0);
-        textChannels.forEach(channel => {
+        guild.channels.cache.filter(c => c.type === 0).forEach(channel => {
             if (guildSettings[guildId].monitoredRooms[channel.id] === undefined) {
                 guildSettings[guildId].monitoredRooms[channel.id] = true;
             }
@@ -89,10 +116,14 @@ function initGuildSettings(guildId) {
     saveSettingsToFile();
 }
 
-// 1. لوق الدخول والخروج للأعضاء (Join / Leave)
-client.on('guildMemberAdd', async (member) => {
+// ==========================================
+// الجزء الثاني: أحداث اللوق (Logs Events)
+// ==========================================
+
+// 1. لوق الدخول والخروج للأعضاء
+client.on(Events.GuildMemberAdd, async (member) => {
     const settings = guildSettings[member.guild.id];
-    if (!settings || !settings.joinLeaveLogChannelId) return;
+    if (!settings?.joinLeaveLogChannelId) return;
     const logChannel = member.guild.channels.cache.get(settings.joinLeaveLogChannelId);
     if (!logChannel) return;
 
@@ -102,17 +133,17 @@ client.on('guildMemberAdd', async (member) => {
         .setDescription(`مرحباً بك في السيرفر العضو: <@${member.id}>`)
         .addFields(
             { name: 'حساب العضو:', value: `<@${member.id}> (\`${member.user.id}\`)`, inline: true },
-            { name: 'عمر الحساب القديم:', value: `<t:${Math.round(member.user.createdTimestamp / 1000)}:R>`, inline: true },
-            { name: 'إجمالي عدد الأعضاء الآن:', value: `\`${member.guild.memberCount}\``, inline: false }
+            { name: 'عمر الحساب:', value: `<t:${Math.round(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+            { name: 'إجمالي الأعضاء:', value: `\`${member.guild.memberCount}\``, inline: false }
         )
         .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-client.on('guildMemberRemove', async (member) => {
+client.on(Events.GuildMemberRemove, async (member) => {
     const settings = guildSettings[member.guild.id];
-    if (!settings || !settings.joinLeaveLogChannelId) return;
+    if (!settings?.joinLeaveLogChannelId) return;
     const logChannel = member.guild.channels.cache.get(settings.joinLeaveLogChannelId);
     if (!logChannel) return;
 
@@ -122,18 +153,18 @@ client.on('guildMemberRemove', async (member) => {
         .setDescription(`خرج أو طرد العضو: <@${member.id}>`)
         .addFields(
             { name: 'العضو:', value: `<@${member.id}> (\`${member.user.id}\`)`, inline: true },
-            { name: 'إجمالي عدد الأعضاء المتبقي:', value: `\`${member.guild.memberCount}\``, inline: true }
+            { name: 'المتبقي:', value: `\`${member.guild.memberCount}\``, inline: true }
         )
         .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 2. لوق حذف الرسائل الاحترافي (إرسال إلى memberLogChannelId)
-client.on('messageDelete', async (message) => {
+// 2. لوق حذف الرسائل
+client.on(Events.MessageDelete, async (message) => {
     if (message.partial || message.author?.bot || !message.guild) return;
     const settings = guildSettings[message.guild.id];
-    if (!settings || !settings.monitoredRooms[message.channel.id] || !settings.memberLogChannelId) return;
+    if (!settings?.memberLogChannelId || !settings.monitoredRooms[message.channel.id]) return;
 
     const logChannel = message.guild.channels.cache.get(settings.memberLogChannelId);
     if (!logChannel) return;
@@ -151,30 +182,27 @@ client.on('messageDelete', async (message) => {
     if (rawContent.length > 1000) rawContent = rawContent.slice(0, 1000) + '...';
 
     const embed = new EmbedBuilder()
-        .setTitle('🗑️ رسالة محذوفة بالتفصيل')
+        .setTitle('🗑️ رسالة محذوفة')
         .setColor('#ef4444')
         .addFields(
-            { name: 'صاحب الرسالة:', value: `<@${message.author.id}>`, inline: true },
-            { name: 'حذفها المشرف:', value: executor, inline: true },
-            { name: 'في الروم:', value: `<#${message.channel.id}>`, inline: true },
-            { name: 'المحتوى المحذوف:', value: `\`\`\`${rawContent}\`\`\`` }
+            { name: 'الكاتب:', value: `<@${message.author.id}>`, inline: true },
+            { name: 'الحاذف:', value: executor, inline: true },
+            { name: 'القناة:', value: `<#${message.channel.id}>`, inline: true },
+            { name: 'المحتوى:', value: `\`\`\`${rawContent}\`\`\`` }
         )
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
-// ==========================================
-// الجزء الثاني: أنظمة العقوبات (الحظر، الطرد، التايم أوت، وبلاغات الخنق)
-// ==========================================
 
-// 3. لوق الحظر (Ban Add)
-client.on('guildBanAdd', async (ban) => {
+// 3. لوق الحظر
+client.on(Events.GuildBanAdd, async (ban) => {
     const settings = guildSettings[ban.guild.id];
-    if (!settings || !settings.banLogChannelId) return;
+    if (!settings?.banLogChannelId) return;
     const logChannel = ban.guild.channels.cache.get(settings.banLogChannelId);
     if (!logChannel) return;
 
     let executor = 'غير معروف';
-    let reason = ban.reason || 'لا يوجد سبب مكتوب';
+    let reason = ban.reason || 'لا يوجد سبب';
 
     try {
         const fetchedLogs = await ban.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberBanAdd });
@@ -185,12 +213,12 @@ client.on('guildBanAdd', async (ban) => {
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle('🔨 عقوبة حظر جديدة (BAN)')
+        .setTitle('🔨 عقوبة حظر (BAN)')
         .setColor('#ef4444')
         .addFields(
-            { name: '👤 العضو المحظور:', value: `<@${ban.user.id}> (\`${ban.user.id}\`)`, inline: true },
-            { name: '🛠️ بواسطة المشرف:', value: executor, inline: true },
-            { name: '📝 السبب المكتوب:', value: `\`\`\`${reason}\`\`\``, inline: false }
+            { name: '👤 المحظور:', value: `<@${ban.user.id}>`, inline: true },
+            { name: '🛠️ المشرف:', value: executor, inline: true },
+            { name: '📝 السبب:', value: `\`\`\`${reason}\`\`\``, inline: false }
         )
         .setThumbnail(ban.user.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
@@ -198,10 +226,10 @@ client.on('guildBanAdd', async (ban) => {
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 4. لوق فك الحظر (Ban Remove)
-client.on('guildBanRemove', async (ban) => {
+// 4. لوق فك الحظر
+client.on(Events.GuildBanRemove, async (ban) => {
     const settings = guildSettings[ban.guild.id];
-    if (!settings || !settings.banLogChannelId) return;
+    if (!settings?.banLogChannelId) return;
     const logChannel = ban.guild.channels.cache.get(settings.banLogChannelId);
     if (!logChannel) return;
 
@@ -215,11 +243,11 @@ client.on('guildBanRemove', async (ban) => {
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle('✅ تم فك الحظر عن عضو')
+        .setTitle('✅ فك حظر')
         .setColor('#22c55e')
         .addFields(
-            { name: '👤 العضو:', value: `<@${ban.user.id}> (\`${ban.user.id}\`)`, inline: true },
-            { name: '🛠️ بواسطة المشرف:', value: executor, inline: true }
+            { name: '👤 العضو:', value: `<@${ban.user.id}>`, inline: true },
+            { name: '🛠️ المشرف:', value: executor, inline: true }
         )
         .setThumbnail(ban.user.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
@@ -227,30 +255,26 @@ client.on('guildBanRemove', async (ban) => {
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 5. لوق الطرد الإداري (Kick)
-client.on('guildMemberRemove', async (member) => {
+// 5. لوق الطرد
+client.on(Events.GuildMemberRemove, async (member) => {
     const settings = guildSettings[member.guild.id];
-    if (!settings || !settings.kickLogChannelId) return;
+    if (!settings?.kickLogChannelId) return;
     const logChannel = member.guild.channels.cache.get(settings.kickLogChannelId);
     if (!logChannel) return;
 
     try {
-        // ننتظر ثانية لضمان تسجيل السجل في الـ Audit Logs
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         const fetchedLogs = await member.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberKick });
         const kickLog = fetchedLogs.entries.first();
 
         if (kickLog && kickLog.target.id === member.id && (Date.now() - kickLog.createdTimestamp) < 8000) {
-            const executor = `<@${kickLog.executor.id}>`;
-            const reason = kickLog.reason || 'لا يوجد سبب مكتوب';
-
             const embed = new EmbedBuilder()
-                .setTitle('🥾 طرد عضو من السيرفر (KICK)')
+                .setTitle('🥾 طرد عضو (KICK)')
                 .setColor('#f97316')
                 .addFields(
-                    { name: '👤 العضو المطرود:', value: `<@${member.id}> (\`${member.id}\`)`, inline: true },
-                    { name: '🛠️ بواسطة المشرف:', value: executor, inline: true },
-                    { name: '📝 السبب:', value: `\`\`\`${reason}\`\`\``, inline: false }
+                    { name: '👤 المطرود:', value: `<@${member.id}>`, inline: true },
+                    { name: '🛠️ المشرف:', value: `<@${kickLog.executor.id}>`, inline: true },
+                    { name: '📝 السبب:', value: `\`\`\`${kickLog.reason || 'لا يوجد سبب'}\`\`\``, inline: false }
                 )
                 .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .setTimestamp();
@@ -260,30 +284,28 @@ client.on('guildMemberRemove', async (member) => {
     } catch (e) {}
 });
 
-// 6. رصد كلمة "خنق" والمنشن (إرسال إلى timeoutLogChannelId)
-client.on('messageCreate', async (message) => {
+// 6. رصد كلمة "خنق"
+client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot || !message.guild) return;
 
     if (message.content.includes('خنق') && message.mentions.members.size > 0) {
         const settings = guildSettings[message.guild.id];
-        if (!settings || !settings.timeoutLogChannelId) return;
+        if (!settings?.timeoutLogChannelId) return;
 
         const logChannel = message.guild.channels.cache.get(settings.timeoutLogChannelId);
         if (!logChannel) return;
 
         const targetMember = message.mentions.members.first();
-        if (!targetMember) return;
-
-        const secureContent = message.content?.trim() ? message.content.slice(0, 1000) : 'لا يوجد نص';
+        const secureContent = message.content.slice(0, 1000);
 
         const embed = new EmbedBuilder()
-            .setTitle('🔍 بلاغ رصد كلمة خنق واحتواء منشن')
+            .setTitle('🔍 بلاغ رصد كلمة خنق')
             .setColor('#eab308')
             .addFields(
-                { name: '👤 بواسطة العضو:', value: `<@${message.author.id}>`, inline: true },
-                { name: '🎯 العضو المستهدف:', value: `<@${targetMember.id}>`, inline: true },
-                { name: '📍 في الروم:', value: `<#${message.channel.id}>`, inline: true },
-                { name: '💬 نص الرسالة الكامل:', value: `\`\`\`${secureContent}\`\`\``, inline: false }
+                { name: '👤 الكاتب:', value: `<@${message.author.id}>`, inline: true },
+                { name: '🎯 المستهدف:', value: `<@${targetMember.id}>`, inline: true },
+                { name: '📍 القناة:', value: `<#${message.channel.id}>`, inline: true },
+                { name: '💬 النص:', value: `\`\`\`${secureContent}\`\`\``, inline: false }
             )
             .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
@@ -292,12 +314,10 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 7. سجل عقوبات التايم أوت وفكها (إرسال إلى timeoutLogChannelId)
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    if (!oldMember.guild) return;
+// 7. لوق التايم أوت
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     const settings = guildSettings[oldMember.guild.id];
-    if (!settings || !settings.timeoutLogChannelId) return;
-
+    if (!settings?.timeoutLogChannelId) return;
     const logChannel = oldMember.guild.channels.cache.get(settings.timeoutLogChannelId);
     if (!logChannel) return;
 
@@ -312,60 +332,30 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             const auditEntry = fetchedLogs.entries.first();
             if (auditEntry && auditEntry.target.id === newMember.id) {
                 executor = `<@${auditEntry.executor.id}>`;
-                reason = auditEntry.reason || 'لا يوجد سبب مكتوب';
+                reason = auditEntry.reason || 'لا يوجد سبب';
             }
         } catch (e) {}
 
-        const totalSeconds = Math.round((newTimeout - Date.now()) / 1000);
-        const durationText = totalSeconds < 60 ? `${totalSeconds} ثانية` : `${Math.round(totalSeconds / 60)} دقيقة`;
-
+        const duration = Math.round((newTimeout - Date.now()) / 60000);
         const embed = new EmbedBuilder()
-            .setTitle('⏱️ عقوبة تايم أوت جديدة')
+            .setTitle('⏱️ عقوبة تايم أوت')
             .setColor('#38bdf8')
             .addFields(
-                { name: '👤 العضو المعاقب:', value: `<@${newMember.id}>`, inline: true },
-                { name: '🛠️ بواسطة المشرف:', value: executor, inline: true },
-                { name: '⏳ مدة العقوبة:', value: `\`${durationText}\``, inline: true },
+                { name: '👤 المعاقب:', value: `<@${newMember.id}>`, inline: true },
+                { name: '🛠️ المشرف:', value: executor, inline: true },
+                { name: '⏳ المدة:', value: `\`${duration} دقيقة\``, inline: true },
                 { name: '📝 السبب:', value: `\`\`\`${reason}\`\`\``, inline: false }
             )
-            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
             .setTimestamp();
-
-        logChannel.send({ embeds: [embed] }).catch(() => {});
-    }
-    else if (oldTimeout && oldTimeout > Date.now() && (!newTimeout || newTimeout <= Date.now())) {
-        let executor = 'تلقائي (انتهاء المدة)';
-        try {
-            const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberUpdate });
-            const auditEntry = fetchedLogs.entries.first();
-            if (auditEntry && auditEntry.target.id === newMember.id) {
-                const change = auditEntry.changes.find(c => c.key === 'communication_disabled_until');
-                if (change && change.old && !change.new) executor = `<@${auditEntry.executor.id}>`;
-            }
-        } catch (e) {}
-
-        const embed = new EmbedBuilder()
-            .setTitle('✅ تم فك عقوبة التايم أوت')
-            .setColor('#22c55e')
-            .addFields(
-                { name: '👤 العضو:', value: `<@${newMember.id}>`, inline: true },
-                { name: '🛠️ المسؤول عن الفك:', value: executor, inline: true }
-            )
-            .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
-            .setTimestamp();
-
         logChannel.send({ embeds: [embed] }).catch(() => {});
     }
 });
-// ==========================================
-// الجزء الثالث: رصد الرومات، الرتب، والثريدات (Channels, Roles, Threads)
-// ==========================================
 
-// 8. لوق إنشاء القنوات والرومات (Channel Create)
-client.on('channelCreate', async (channel) => {
+// 8. لوق القنوات
+client.on(Events.ChannelCreate, async (channel) => {
     if (!channel.guild) return;
     const settings = guildSettings[channel.guild.id];
-    if (!settings || !settings.roomLogChannelId) return;
+    if (!settings?.roomLogChannelId) return;
     const logChannel = channel.guild.channels.cache.get(settings.roomLogChannelId);
     if (!logChannel) return;
 
@@ -373,30 +363,24 @@ client.on('channelCreate', async (channel) => {
     try {
         const fetchedLogs = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelCreate });
         const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry && auditEntry.target.id === channel.id) {
-            executor = `<@${auditEntry.executor.id}>`;
-        }
+        if (auditEntry && auditEntry.target.id === channel.id) executor = `<@${auditEntry.executor.id}>`;
     } catch (e) {}
 
-    const typeText = channel.type === 4 ? 'فئة (Category)' : (channel.type === 2 ? 'روم صوتي (Voice)' : 'روم كتابي (Text)');
-
     const embed = new EmbedBuilder()
-        .setTitle('🏗️ تم إنشاء روم جديد')
+        .setTitle('🏗️ إنشاء قناة')
         .setColor('#22c55e')
         .addFields(
-            { name: 'اسم الروم:', value: `<#${channel.id}> | \`#${channel.name}\``, inline: true },
-            { name: 'بواسطة المشرف:', value: executor, inline: true },
-            { name: 'نوع الروم:', value: `\`${typeText}\``, inline: true }
+            { name: 'القناة:', value: `<#${channel.id}>`, inline: true },
+            { name: 'المشرف:', value: executor, inline: true }
         )
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 9. لوق حذف القنوات والرومات (Channel Delete)
-client.on('channelDelete', async (channel) => {
+client.on(Events.ChannelDelete, async (channel) => {
     if (!channel.guild) return;
     const settings = guildSettings[channel.guild.id];
-    if (!settings || !settings.roomLogChannelId) return;
+    if (!settings?.roomLogChannelId) return;
     const logChannel = channel.guild.channels.cache.get(settings.roomLogChannelId);
     if (!logChannel) return;
 
@@ -404,30 +388,27 @@ client.on('channelDelete', async (channel) => {
     try {
         const fetchedLogs = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete });
         const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry && auditEntry.target.id === channel.id) {
-            executor = `<@${auditEntry.executor.id}>`;
-        }
+        if (auditEntry && auditEntry.target.id === channel.id) executor = `<@${auditEntry.executor.id}>`;
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle('🗑️ تم حذف روم بالكامل')
+        .setTitle('🗑️ حذف قناة')
         .setColor('#ef4444')
         .addFields(
-            { name: 'اسم الروم المحذوف:', value: `\`#${channel.name}\``, inline: true },
-            { name: 'حذفه المشرف:', value: executor, inline: true }
+            { name: 'الاسم:', value: `\`#${channel.name}\``, inline: true },
+            { name: 'المشرف:', value: executor, inline: true }
         )
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 10. لوق تعديل وإعطاء وسحب الرتب للأعضاء (Role Updates & Assignments)
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
+// 9. لوق الرتب
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     const settings = guildSettings[oldMember.guild.id];
-    if (!settings || !settings.roleLogChannelId) return;
+    if (!settings?.roleLogChannelId) return;
     const logChannel = oldMember.guild.channels.cache.get(settings.roleLogChannelId);
     if (!logChannel) return;
 
-    // حساب الرتب المضافة والمحذوفة
     const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
     const removedRoles = oldMember.roles.cache.filter(role => !newMember.roles.cache.has(role.id));
 
@@ -437,187 +418,94 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     try {
         const fetchedLogs = await newMember.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberRoleUpdate });
         const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry && auditEntry.target.id === newMember.id) {
-            executor = `<@${auditEntry.executor.id}>`;
-        }
+        if (auditEntry && auditEntry.target.id === newMember.id) executor = `<@${auditEntry.executor.id}>`;
     } catch (e) {}
 
     const embed = new EmbedBuilder()
-        .setTitle('🏷️ تحديث في رتب عضو')
+        .setTitle('🏷️ تحديث رتب')
         .setColor('#5865f2')
         .addFields(
-            { name: '👤 العضو المستهدف:', value: `<@${newMember.id}>`, inline: true },
-            { name: '🛠️ المسؤول عن التغيير:', value: executor, inline: true }
+            { name: '👤 العضو:', value: `<@${newMember.id}>`, inline: true },
+            { name: '🛠️ المشرف:', value: executor, inline: true }
         )
-        .setThumbnail(newMember.user.displayAvatarURL({ dynamic: true }))
         .setTimestamp();
 
-    if (addedRoles.size > 0) {
-        embed.addFields({ name: '➕ رتب تم إعطاؤها:', value: addedRoles.map(r => `<@&${r.id}>`).join(', ') });
-    }
-    if (removedRoles.size > 0) {
-        embed.addFields({ name: '➖ رتب تم سحبها:', value: removedRoles.map(r => `<@&${r.id}>`).join(', ') });
-    }
+    if (addedRoles.size > 0) embed.addFields({ name: '➕ رتب مضافة:', value: addedRoles.map(r => `<@&${r.id}>`).join(', ') });
+    if (removedRoles.size > 0) embed.addFields({ name: '➖ رتب مسحوبة:', value: removedRoles.map(r => `<@&${r.id}>`).join(', ') });
 
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 11. لوق إنشاء وحذف الثريدات (Threads Monitor)
-client.on('threadCreate', async (thread) => {
+// 10. لوق الثريدات
+client.on(Events.ThreadCreate, async (thread) => {
     const settings = guildSettings[thread.guild.id];
-    if (!settings || !settings.threadLogChannelId) return;
+    if (!settings?.threadLogChannelId) return;
     const logChannel = thread.guild.channels.cache.get(settings.threadLogChannelId);
     if (!logChannel) return;
 
-    let executor = 'غير معروف';
-    try {
-        const fetchedLogs = await thread.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ThreadCreate });
-        const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry && auditEntry.target.id === thread.id) {
-            executor = `<@${auditEntry.executor.id}>`;
-        }
-    } catch (e) {}
-
     const embed = new EmbedBuilder()
-        .setTitle('🧵 تم إنشاء ثريد (Thread) جديد')
+        .setTitle('🧵 إنشاء ثريد')
         .setColor('#38bdf8')
-        .addFields(
-            { name: 'اسم الثريد:', value: `<#${thread.id}> | \`${thread.name}\``, inline: true },
-            { name: 'بواسطة الشخص:', value: executor, inline: true },
-            { name: 'في روم رئيسي:', value: `<#${thread.parentId}>`, inline: true }
-        )
+        .addFields({ name: 'الثريد:', value: `<#${thread.id}>`, inline: true })
         .setTimestamp();
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-client.on('threadDelete', async (thread) => {
-    const settings = guildSettings[thread.guild.id];
-    if (!settings || !settings.threadLogChannelId) return;
-    const logChannel = thread.guild.channels.cache.get(settings.threadLogChannelId);
-    if (!logChannel) return;
-
-    let executor = 'غير معروف';
-    try {
-        const fetchedLogs = await thread.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ThreadDelete });
-        const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry && auditEntry.target.id === thread.id) {
-            executor = `<@${auditEntry.executor.id}>`;
-        }
-    } catch (e) {}
-
-    const embed = new EmbedBuilder()
-        .setTitle('🗑️ تم حذف ثريد (Thread)')
-        .setColor('#ef4444')
-        .addFields(
-            { name: 'اسم الثريد المحذوف:', value: `\`${thread.name}\``, inline: true },
-            { name: 'حذفه المسؤول:', value: executor, inline: true }
-        )
-        .setTimestamp();
-    logChannel.send({ embeds: [embed] }).catch(() => {});
-});
-// ==========================================
-// الجزء الرابع: لوق التفاعلات، تعديلات السيرفر، مسارات لوحة التحكم وتشغيل البوت
-// ==========================================
-
-// 12. حدث رصد إضافة تفاعلات الإيموجي (Reaction Add)
-client.on('messageReactionAdd', async (reaction, user) => {
+// 11. لوق التفاعلات
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (user.bot || !reaction.message.guild) return;
-    if (reaction.partial) { try { await reaction.fetch(); } catch (e) { return; } }
+    if (reaction.partial) await reaction.fetch().catch(() => {});
 
     const settings = guildSettings[reaction.message.guild.id];
-    if (!settings || !settings.reactionLogChannelId || !settings.monitoredReactions[reaction.message.channel.id]) return;
+    if (!settings?.reactionLogChannelId || !settings.monitoredReactions[reaction.message.channel.id]) return;
 
     const logChannel = reaction.message.guild.channels.cache.get(settings.reactionLogChannelId);
     if (!logChannel) return;
 
-    const emojiDisplay = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
-
+    const emoji = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
     const embed = new EmbedBuilder()
-        .setTitle('😀 إضافة تفاعل إيموجي')
+        .setTitle('😀 إضافة تفاعل')
         .setColor('#22c55e')
         .addFields(
-            { name: 'بواسطة العضو:', value: `<@${user.id}>`, inline: true },
-            { name: 'الإيموجي المستخدم:', value: `${emojiDisplay} (\`${reaction.emoji.name}\`)`, inline: true },
-            { name: 'في الروم:', value: `<#${reaction.message.channel.id}>`, inline: true },
-            { name: 'صاحب الرسالة الأصلية:', value: `<@${reaction.message.author?.id || 'غير معروف'}>`, inline: true },
-            { name: 'رابط الرسالة التفاعلية:', value: `[اضغط هنا للانتقال](${reaction.message.url})`, inline: false }
+            { name: 'العضو:', value: `<@${user.id}>`, inline: true },
+            { name: 'الإيموجي:', value: emoji, inline: true },
+            { name: 'القناة:', value: `<#${reaction.message.channel.id}>`, inline: true }
         )
         .setTimestamp();
-
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
-// 13. حدث رصد إزالة تفاعلات الإيموجي (Reaction Remove)
-client.on('messageReactionRemove', async (reaction, user) => {
-    if (user.bot || !reaction.message.guild) return;
-    if (reaction.partial) { try { await reaction.fetch(); } catch (e) { return; } }
-
-    const settings = guildSettings[reaction.message.guild.id];
-    if (!settings || !settings.reactionLogChannelId || !settings.monitoredReactions[reaction.message.channel.id]) return;
-
-    const logChannel = reaction.message.guild.channels.cache.get(settings.reactionLogChannelId);
-    if (!logChannel) return;
-
-    const emojiDisplay = reaction.emoji.id ? `<:${reaction.emoji.name}:${reaction.emoji.id}>` : reaction.emoji.name;
-
-    const embed = new EmbedBuilder()
-        .setTitle('❌ إزالة تفاعل إيموجي')
-        .setColor('#ef4444')
-        .addFields(
-            { name: 'بواسطة العضو:', value: `<@${user.id}>`, inline: true },
-            { name: 'الإيموجي المحذوف:', value: `${emojiDisplay} (\`${reaction.emoji.name}\`)`, inline: true },
-            { name: 'من الروم:', value: `<#${reaction.message.channel.id}>`, inline: true },
-            { name: 'صاحب الرسالة الأصلية:', value: `<@${reaction.message.author?.id || 'غير معروف'}>`, inline: true },
-            { name: 'رابط الرسالة التفاعلية:', value: `[اضغط هنا للانتقال](${reaction.message.url})`, inline: false }
-        )
-        .setTimestamp();
-
-    logChannel.send({ embeds: [embed] }).catch(() => {});
-});
-
-// 14. لوق تعديل إعدادات وتغييرات السيرفر (Guild Update)
-client.on('guildUpdate', async (oldGuild, newGuild) => {
+// 12. لوق تعديل السيرفر
+client.on(Events.GuildUpdate, async (oldGuild, newGuild) => {
     const settings = guildSettings[newGuild.id];
-    if (!settings || !settings.serverLogChannelId) return;
+    if (!settings?.serverLogChannelId) return;
     const logChannel = newGuild.channels.cache.get(settings.serverLogChannelId);
     if (!logChannel) return;
 
-    let executor = 'مشرف مجهول';
-    try {
-        const fetchedLogs = await newGuild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.GuildUpdate });
-        const auditEntry = fetchedLogs.entries.first();
-        if (auditEntry) executor = `<@${auditEntry.executor.id}>`;
-    } catch (e) {}
-
     const embed = new EmbedBuilder()
-        .setTitle('⚙️ تحديث في إعدادات السيرفر')
+        .setTitle('⚙️ تحديث إعدادات السيرفر')
         .setColor('#eab308')
-        .addFields({ name: '🛠️ المسؤول عن التعديل:', value: executor, inline: false })
         .setTimestamp();
 
     if (oldGuild.name !== newGuild.name) {
         embed.addFields(
-            { name: 'اسم السيرفر القديم:', value: `\`${oldGuild.name}\``, inline: true },
-            { name: 'اسم السيرفر الجديد:', value: `\`${newGuild.name}\``, inline: true }
+            { name: 'الاسم القديم:', value: `\`${oldGuild.name}\``, inline: true },
+            { name: 'الاسم الجديد:', value: `\`${newGuild.name}\``, inline: true }
         );
     }
-    if (oldGuild.icon !== newGuild.icon) {
-        embed.addFields({ name: '🖼️ أيقونة السيرفر:', value: 'تم تغيير الصورة الرمزية للسيرفر.', inline: false });
-    }
-
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
 // ==========================================
-// مسارات واجهة المستخدم ولوحة التحكم المباشرة Express Routes
+// الجزء الثالث: مسارات لوحة التحكم (Express Routes)
 // ==========================================
 
 app.get('/', (req, res) => {
-    if (!client.user) return res.send('جاري تشغيل البوت، انتظر ثواني واعمل تحديث للصفحة.');
-    let botGuilds = client.guilds.cache.map(g => ({
+    if (!client.isReady()) return res.send('جاري تشغيل البوت، يرجى تحديث الصفحة بعد قليل.');
+    const botGuilds = client.guilds.cache.map(g => ({
         id: g.id,
         name: g.name,
-        icon: g.iconURL() ? g.iconURL() : 'https://discordapp.com'
+        icon: g.iconURL() || 'https://discordapp.com/assets/1f0ac53a83592880c5d6d611ba2a7e70.svg'
     }));
     res.send(getGuildSelectorHtml(client, botGuilds));
 });
@@ -636,10 +524,8 @@ app.get('/manage/:guildId', (req, res) => {
 
 app.post('/update/:guildId', (req, res) => {
     const guildId = req.params.guildId;
-    
     if (!guildSettings[guildId]) initGuildSettings(guildId);
 
-    // استقبال وحفظ المتغيرات الـ 13 الجديدة بالكامل من صفحة الويب
     const logKeys = [
         'ticketLogChannelId', 'roleLogChannelId', 'roomLogChannelId', 'memberLogChannelId',
         'timeoutLogChannelId', 'kickLogChannelId', 'banLogChannelId', 'serverLogChannelId',
@@ -650,24 +536,30 @@ app.post('/update/:guildId', (req, res) => {
         guildSettings[guildId][key] = req.body[key] || "";
     });
 
-    const { enabledMessageRooms, enabledReactionRooms } = req.body;
-    const msgRooms = Array.isArray(enabledMessageRooms) ? enabledMessageRooms : (enabledMessageRooms ? [enabledMessageRooms] : []);
-    const reactRooms = Array.isArray(enabledReactionRooms) ? enabledReactionRooms : (enabledReactionRooms ? [enabledReactionRooms] : []);
+    // معالجة مربعات الاختيار (Checkboxes)
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
+        const textChannels = guild.channels.cache.filter(c => c.type === 0);
+        const msgRooms = Array.isArray(req.body.enabledMessageRooms) ? req.body.enabledMessageRooms : (req.body.enabledMessageRooms ? [req.body.enabledMessageRooms] : []);
+        const reactRooms = Array.isArray(req.body.enabledReactionRooms) ? req.body.enabledReactionRooms : (req.body.enabledReactionRooms ? [req.body.enabledReactionRooms] : []);
 
-    for (let roomId in guildSettings[guildId].monitoredRooms) {
-        guildSettings[guildId].monitoredRooms[roomId] = msgRooms.includes(roomId);
-    }
-    for (let roomId in guildSettings[guildId].monitoredReactions) {
-        guildSettings[guildId].monitoredReactions[roomId] = reactRooms.includes(roomId);
+        textChannels.forEach(channel => {
+            guildSettings[guildId].monitoredRooms[channel.id] = msgRooms.includes(channel.id);
+            guildSettings[guildId].monitoredReactions[channel.id] = reactRooms.includes(channel.id);
+        });
     }
 
     saveSettingsToFile();
-    res.redirect(`/manage/${guildId}`);
+    res.redirect(`/manage/${guildId}?success=true`);
 });
 
+// تشغيل البوت
 if (process.env.DISCORD_TOKEN) {
-    client.login(process.env.DISCORD_TOKEN).catch(err => console.error(err.message));
+    client.login(process.env.DISCORD_TOKEN).catch(err => console.error('[LOGIN ERROR]', err.message));
+} else {
+    console.error('[ERROR] DISCORD_TOKEN is missing in .env file');
 }
 
+// تشغيل السيرفر
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Dashboard Server live on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`[DASHBOARD] Live on port ${PORT}`));
