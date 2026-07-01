@@ -21,35 +21,37 @@ function getGuildSelectorHtml(client, guildsList) {
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>لوحة الإدارة المركزية الشاملة</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>لوحة الإدارة المركزية | LoggerBot</title>
         <style>
-            :root { --bg-p: #090d16; --bg-s: #111827; --bg-a: #1f2937; --text: #f3f4f6; --text-m: #9ca3af; --blue: #38bdf8; --glow: rgba(56, 189, 248, 0.15); }
-            * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { background: var(--bg-p); color: var(--text); min-height: 100vh; display: flex; align-items: center; }
-            .container { max-width: 1100px; width: 100%; margin: 40px auto; padding: 40px; background: var(--bg-s); border-radius: 24px; border: 1px solid var(--bg-a); box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
-            header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid var(--bg-a); padding-bottom: 25px; }
-            h1 { font-size: 28px; font-weight: 800; background: linear-gradient(to left, #fff, var(--blue)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-            .invite-btn { background: #5865F2; color: #fff; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: bold; font-size: 14px; transition: 0.3s ease; box-shadow: 0 4px 15px rgba(88, 101, 242, 0.3); }
-            .invite-btn:hover { background: #4752c4; transform: translateY(-2px); }
-            .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
-            .server-card { background: var(--bg-p); border: 1px solid var(--bg-a); border-radius: 16px; padding: 24px; display: flex; align-items: center; gap: 20px; transition: 0.3s ease; }
-            .server-card:hover { border-color: var(--blue); box-shadow: 0 0 25px var(--glow); transform: translateY(-3px); }
-            .server-icon { width: 64px; height: 64px; border-radius: 16px; background: var(--bg-a); object-fit: cover; }
+            :root { --bg-p: #0b0f1a; --bg-s: #161b2c; --bg-a: #232a3d; --text: #f3f4f6; --text-m: #9ca3af; --blue: #38bdf8; --glow: rgba(56, 189, 248, 0.2); }
+            * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+            body { background: var(--bg-p); color: var(--text); min-height: 100vh; padding: 20px; }
+            .container { max-width: 1200px; margin: 40px auto; padding: 40px; background: var(--bg-s); border-radius: 24px; border: 1px solid var(--bg-a); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+            header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid var(--bg-a); padding-bottom: 25px; flex-wrap: wrap; gap: 20px; }
+            h1 { font-size: 32px; font-weight: 800; background: linear-gradient(90deg, #fff, var(--blue)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+            .invite-btn { background: #5865F2; color: #fff; padding: 14px 28px; border-radius: 14px; text-decoration: none; font-weight: bold; font-size: 15px; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 15px rgba(88, 101, 242, 0.4); }
+            .invite-btn:hover { background: #4752c4; transform: translateY(-3px); box-shadow: 0 8px 25px rgba(88, 101, 242, 0.5); }
+            .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 25px; }
+            .server-card { background: var(--bg-a); border: 1px solid transparent; border-radius: 20px; padding: 25px; display: flex; align-items: center; gap: 20px; transition: 0.3s; cursor: default; }
+            .server-card:hover { border-color: var(--blue); box-shadow: 0 0 30px var(--glow); transform: translateY(-5px); }
+            .server-icon { width: 70px; height: 70px; border-radius: 20px; background: #000; object-fit: cover; border: 2px solid var(--bg-s); }
             .server-details { flex-grow: 1; }
-            .server-details h3 { font-size: 16px; margin-bottom: 6px; font-weight: 700; color: #fff; }
-            .status-tag { font-size: 12px; font-weight: 600; color: #10b981; }
-            .ctrl-btn { padding: 10px 16px; border-radius: 10px; text-decoration: none; font-size: 13px; font-weight: bold; background: var(--bg-a); color: var(--text); transition: 0.2s; }
-            .server-card:hover .ctrl-btn { background: var(--blue); color: var(--bg-p); }
+            .server-details h3 { font-size: 18px; margin-bottom: 8px; color: #fff; }
+            .status-tag { font-size: 12px; font-weight: 600; color: #10b981; display: flex; align-items: center; gap: 5px; }
+            .ctrl-btn { padding: 12px 20px; border-radius: 12px; text-decoration: none; font-size: 14px; font-weight: bold; background: var(--bg-s); color: var(--text); transition: 0.3s; border: 1px solid var(--bg-a); }
+            .server-card:hover .ctrl-btn { background: var(--blue); color: var(--bg-p); border-color: var(--blue); }
+            @media (max-width: 600px) { .container { padding: 20px; } header { text-align: center; justify-content: center; } }
         </style>
     </head>
     <body>
         <div class="container">
             <header>
                 <div>
-                    <h1>لوحة الإدارة والمراقبة الاحترافية</h1>
-                    <p style="color: var(--text-m); margin-top: 6px; font-size: 14px;">نظام الرقابة المركزي واللوق المتقدم لجميع أحداث وتغييرات السيرفر.</p>
+                    <h1>لوحة التحكم المركزية</h1>
+                    <p style="color: var(--text-m); margin-top: 8px; font-size: 15px;">إدارة نظام LoggerBot المتقدم لجميع سيرفراتك.</p>
                 </div>
-                <a href="${botInviteUrl}" target="_blank" class="invite-btn">➕ دعوة البوت لسيرفر جديد</a>
+                <a href="${botInviteUrl}" target="_blank" class="invite-btn">➕ إضافة البوت لسيرفر</a>
             </header>
             <div class="server-grid">${cardsHtml}</div>
         </div>
@@ -58,21 +60,20 @@ function getGuildSelectorHtml(client, guildsList) {
 }
 
 function getManageServerHtml(guild, textChannels, settings) {
-    // قائمة بأنواع اللوق الجديدة لتوليد الخيارات تلقائياً بنظام منسق ونظيف
     const logTypes = [
-        { key: 'ticketLogChannelId', label: '🎫 روم لوق التكت (Tickets):' },
-        { key: 'roleLogChannelId', label: '🏷️ روم لوق الرتب والتعيينات (Roles):' },
-        { key: 'roomLogChannelId', label: '🏗️ روم لوق الرومات وإنشائها/حذفها (Channels):' },
-        { key: 'memberLogChannelId', label: '👥 روم لوق تعديلات الأعضاء والرسائل:' },
-        { key: 'timeoutLogChannelId', label: '⏱️ روم لوق التايم أوت وبلاغات الخنق:' },
-        { key: 'kickLogChannelId', label: '🥾 روم لوق الطرد الفوري (Kicks):' },
-        { key: 'banLogChannelId', label: '🔨 روم لوق الحظر وفك الحظر (Bans):' },
-        { key: 'serverLogChannelId', label: '⚙️ روم لوق إعدادات وتعديلات السيرفر:' },
-        { key: 'prisonLogChannelId', label: '⛓️ روم لوق السجن والمخالفات المتقدمة:' },
-        { key: 'joinLeaveLogChannelId', label: '🚪 روم لوق الدخول والخروج والجراند:' },
-        { key: 'threadLogChannelId', label: '🧵 روم لوق الثريدات والمنشورات الفرعية:' },
-        { key: 'adminLogChannelId', label: '🛠️ روم لوق استخدام الأوامر الإدارية:' },
-        { key: 'reactionLogChannelId', label: '😀 روم لوق تفاعلات الإيموجي (Reactions):' }
+        { key: 'ticketLogChannelId', label: '🎫 لوق التكتات (Tickets)' },
+        { key: 'roleLogChannelId', label: '🏷️ لوق الرتب (Roles)' },
+        { key: 'roomLogChannelId', label: '🏗️ لوق القنوات (Channels)' },
+        { key: 'memberLogChannelId', label: '👥 لوق الأعضاء والرسائل' },
+        { key: 'timeoutLogChannelId', label: '⏱️ لوق التايم أوت والخنق' },
+        { key: 'kickLogChannelId', label: '🥾 لوق الطرد (Kicks)' },
+        { key: 'banLogChannelId', label: '🔨 لوق الحظر (Bans)' },
+        { key: 'serverLogChannelId', label: '⚙️ لوق إعدادات السيرفر' },
+        { key: 'prisonLogChannelId', label: '⛓️ لوق السجن والمخالفات' },
+        { key: 'joinLeaveLogChannelId', label: '🚪 لوق الدخول والخروج' },
+        { key: 'threadLogChannelId', label: '🧵 لوق الثريدات (Threads)' },
+        { key: 'adminLogChannelId', label: '🛠️ لوق الأوامر الإدارية' },
+        { key: 'reactionLogChannelId', label: '😀 لوق التفاعلات (Reactions)' }
     ];
 
     let formsHtml = logTypes.map(type => {
@@ -84,7 +85,7 @@ function getManageServerHtml(guild, textChannels, settings) {
         <div class="form-group">
             <label>${type.label}</label>
             <select name="${type.key}">
-                <option value="">-- تعطيل هذا اللوق --</option>
+                <option value="">-- معطل --</option>
                 ${options}
             </select>
         </div>`;
@@ -109,53 +110,62 @@ function getManageServerHtml(guild, textChannels, settings) {
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>الإعدادات المتقدمة | ${guild.name}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>إعدادات ${guild.name} | LoggerBot</title>
         <style>
-            :root { --bg-p: #090d16; --bg-s: #111827; --bg-a: #1f2937; --text: #f3f4f6; --text-m: #9ca3af; --blue: #38bdf8; }
-            * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-            body { background: var(--bg-p); color: var(--text); padding: 40px 20px; }
-            .container { max-width: 950px; margin: 0 auto; background: var(--bg-s); border: 1px solid var(--bg-a); padding: 40px; border-radius: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
-            h2 { font-size: 24px; margin-bottom: 30px; border-bottom: 1px solid var(--bg-a); padding-bottom: 15px; color: #fff; display: flex; align-items: center; gap: 10px; }
-            .log-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-            .form-group { margin-bottom: 20px; }
-            label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 13px; color: #e5e7eb; }
-            select { width: 100%; padding: 12px; border-radius: 8px; background: var(--bg-p); color: #fff; border: 1px solid var(--bg-a); font-size: 13px; outline: none; }
-            select:focus { border-color: var(--blue); }
-            .grid-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 25px; border-top: 1px solid var(--bg-a); padding-top: 25px; }
-            .rooms-list { background: var(--bg-p); border: 1px solid var(--bg-a); padding: 15px; border-radius: 10px; max-height: 220px; overflow-y: auto; }
-            .room-checkbox-label { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer; font-size: 13px; color: var(--text-m); }
-            .room-checkbox-label input { width: 16px; height: 16px; accent-color: var(--blue); }
+            :root { --bg-p: #0b0f1a; --bg-s: #161b2c; --bg-a: #232a3d; --text: #f3f4f6; --text-m: #9ca3af; --blue: #38bdf8; --success: #10b981; }
+            * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
+            body { background: var(--bg-p); color: var(--text); padding: 20px; }
+            .container { max-width: 1000px; margin: 20px auto; background: var(--bg-s); border: 1px solid var(--bg-a); padding: 40px; border-radius: 24px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); position: relative; }
+            h2 { font-size: 26px; margin-bottom: 30px; border-bottom: 2px solid var(--bg-a); padding-bottom: 15px; color: #fff; display: flex; align-items: center; gap: 12px; }
+            .success-msg { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); color: var(--success); padding: 15px; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: bold; display: none; }
+            .log-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+            .form-group { margin-bottom: 20px; background: var(--bg-a); padding: 15px; border-radius: 15px; border: 1px solid transparent; transition: 0.3s; }
+            .form-group:focus-within { border-color: var(--blue); }
+            label { display: block; margin-bottom: 10px; font-weight: 600; font-size: 14px; color: #e5e7eb; }
+            select { width: 100%; padding: 12px; border-radius: 10px; background: var(--bg-p); color: #fff; border: 1px solid var(--bg-a); font-size: 14px; outline: none; cursor: pointer; }
+            .grid-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin-top: 30px; border-top: 2px solid var(--bg-a); padding-top: 30px; }
+            .rooms-list { background: var(--bg-p); border: 1px solid var(--bg-a); padding: 20px; border-radius: 15px; max-height: 250px; overflow-y: auto; }
+            .room-checkbox-label { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; cursor: pointer; font-size: 14px; color: var(--text-m); transition: 0.2s; }
+            .room-checkbox-label input { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; }
             .room-checkbox-label:hover { color: #fff; }
-            button[type="submit"] { width: 100%; padding: 16px; background: var(--blue); color: var(--bg-p); font-weight: 800; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; transition: 0.2s ease; margin-top: 30px; box-shadow: 0 4px 20px rgba(56, 189, 248, 0.2); }
-            button[type="submit"]:hover { transform: translateY(-2px); filter: brightness(1.1); }
-            .back-btn { display: inline-block; margin-bottom: 20px; color: var(--blue); text-decoration: none; font-size: 14px; font-weight: 600; }
+            .save-btn { width: 100%; padding: 18px; background: var(--blue); color: var(--bg-p); font-weight: 800; border: none; border-radius: 15px; cursor: pointer; font-size: 16px; transition: 0.3s; margin-top: 40px; box-shadow: 0 10px 20px rgba(56, 189, 248, 0.2); }
+            .save-btn:hover { transform: translateY(-3px); box-shadow: 0 15px 30px rgba(56, 189, 248, 0.3); filter: brightness(1.1); }
+            .back-btn { display: inline-flex; align-items: center; margin-bottom: 25px; color: var(--blue); text-decoration: none; font-size: 15px; font-weight: 600; gap: 8px; transition: 0.2s; }
+            .back-btn:hover { transform: translateX(5px); }
+            @media (max-width: 768px) { .grid-sections { grid-template-columns: 1fr; } }
         </style>
     </head>
     <body>
         <div class="container">
-            <a href="/" class="back-btn">← العودة للرئيسية</a>
-            <h2>🛡️ تهيئة نظام الرقابة الشامل لسيرفر: ${guild.name}</h2>
+            <a href="/" class="back-btn">← العودة للقائمة</a>
+            <div id="success" class="success-msg">✅ تم حفظ جميع الإعدادات بنجاح!</div>
+            <h2>🛡️ إعدادات الرقابة | ${guild.name}</h2>
             <form action="/update/${guild.id}" method="POST">
-                
-                <!-- شبكة توزيع غرف اللوق المحترفة -->
                 <div class="log-grid">
                     ${formsHtml}
                 </div>
-
                 <div class="grid-sections">
                     <div class="form-group">
-                        <label>🔒 رومات رقابة الرسائل (تعديل وحذف رسائل الأعضاء):</label>
+                        <label>🔒 مراقبة الرسائل (حذف وتعديل):</label>
                         <div class="rooms-list">${checkboxesHtml}</div>
                     </div>
                     <div class="form-group">
-                        <label>🔔 رومات رقابة تفاعلات الإيموجي للريأكشنات:</label>
+                        <label>🔔 مراقبة التفاعلات (ريأكشنات):</label>
                         <div class="rooms-list">${reactionCheckboxesHtml}</div>
                     </div>
                 </div>
-
-                <button type="submit">💾 حفظ التغييرات الشاملة وتحديث قنوات اللوق</button>
+                <button type="submit" class="save-btn">💾 حفظ التغييرات الآن</button>
             </form>
         </div>
+        <script>
+            if(new URLSearchParams(window.location.search).get('success')) {
+                document.getElementById('success').style.display = 'block';
+                setTimeout(() => {
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }, 3000);
+            }
+        </script>
     </body>
     </html>`;
 }
